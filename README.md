@@ -52,7 +52,7 @@ Plugins are grouped in the UI by what they add:
 
 The official store lives in `plugins/` and cannot be removed. In **Plugins → Repositories**, an administrator can install another Git repository URL. Open EasyX validates and clones it into `/data/plugin-repositories`, loads plugins from either its root or `plugins/`, and lets the administrator update or remove that repository later.
 
-See [docs/PLUGINS.md](docs/PLUGINS.md) for the SDK contract and community repository layout.
+See [docs/PLUGINS.md](docs/PLUGINS.md) for the SDK contract, or start a store from the public [Open EasyX Community Plugins template](https://github.com/raccommode/OpenEasyX-Community-Plugins).
 
 ## Persistent paths
 
