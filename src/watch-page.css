@@ -1,0 +1,169 @@
+.watch-page {
+  min-height: calc(100vh - 90px);
+  min-height: calc(100dvh - 90px);
+  background: #050506;
+}
+
+.theater-stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  background: #030304;
+  border-bottom: 1px solid var(--line);
+}
+
+.theater-stage .custom-player,
+.theater-stage .image-stage {
+  width: 100%;
+  max-width: calc(177.7778vh - 160px);
+  max-width: calc(177.7778dvh - 160px);
+  max-height: calc(100vh - 90px);
+  max-height: calc(100dvh - 90px);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+
+.theater-stage .image-stage {
+  min-height: 0;
+  position: relative;
+  background: #000;
+}
+
+.theater-stage .image-stage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.watch-info {
+  width: min(100%, 1600px);
+  margin: 0 auto;
+  padding: 28px clamp(24px, 4vw, 68px) 55px;
+  background: var(--bg);
+}
+
+.watch-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 25px;
+}
+
+.watch-heading h1 {
+  max-width: 950px;
+  margin: 9px 0 8px;
+  font-size: clamp(24px, 3vw, 40px);
+  line-height: 1.12;
+  letter-spacing: -.025em;
+}
+
+.watch-heading p {
+  margin: 0;
+  color: #85858f;
+  font-size: 12px;
+}
+
+.watch-eyebrow {
+  color: #ff7386;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.watch-actions {
+  display: flex;
+  flex: none;
+  gap: 9px;
+}
+
+.watch-actions .quiet svg {
+  width: 17px;
+}
+
+.watch-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.watch-meta > span {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid #29292f;
+  border-radius: 8px;
+  color: #9a9aa4;
+  background: #151519;
+  font-size: 9px;
+}
+
+.watch-meta svg {
+  width: 13px;
+}
+
+.watch-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 17px;
+  border-top: 1px solid #242429;
+  color: #686872;
+  font-size: 9px;
+}
+
+.watch-file span {
+  flex: none;
+  color: #9999a2;
+  font-weight: 750;
+}
+
+.watch-file code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 800px) {
+  .watch-page {
+    min-height: calc(100dvh - 72px);
+  }
+
+  .theater-stage .custom-player,
+  .theater-stage .image-stage {
+    max-width: calc(177.7778dvh - 128px);
+    max-height: calc(100dvh - 72px);
+  }
+
+  .watch-info {
+    padding: 22px 16px 44px;
+  }
+
+  .watch-heading {
+    display: block;
+  }
+
+  .watch-actions {
+    margin-top: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  .watch-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .watch-actions .quiet {
+    padding: 10px;
+  }
+}

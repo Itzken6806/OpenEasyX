@@ -1,0 +1,9 @@
+.unified-nav { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; padding-right: 2px; }
+.unified-nav .nav-group { display: grid; gap: 3px; }
+.unified-nav .nav-group > p { margin: 0; padding: 0 12px 5px; color: #555560; font-size: 8px; font-weight: 850; letter-spacing: .16em; }
+.unified-nav .nav-group > a { min-height: 38px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: #7e7e89; text-decoration: none; font-size: 12px; font-weight: 700; }
+.unified-nav .nav-group > a:hover { color: #ddd; background: #151519; }
+.unified-nav .nav-group > a.active { color: #fff; background: #1a1a1f; }
+.unified-nav .nav-group > a.active svg { color: #fa4058; }
+.unified-nav .nav-group > a svg { width: 17px; flex: none; }
+.brand-wordmark { justify-content: flex-start; padding-left: 12px; }

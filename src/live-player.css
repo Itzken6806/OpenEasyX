@@ -1,0 +1,108 @@
+.live-custom-player {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+.theater-stage .live-watch-stage {
+  width: 100%;
+  max-width: calc(177.7778vh - 160px);
+  max-width: calc(177.7778dvh - 160px);
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+}
+
+.theater-stage .live-watch-stage .live-custom-player {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+.player-live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 7px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+
+.player-live-status > svg {
+  width: 15px;
+  color: #ff6679;
+}
+
+.player-live-status > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 4px rgba(250,64,88,.16);
+  animation: on-air-pulse 1.8s ease-out infinite;
+}
+
+.live-stage-status {
+  z-index: 12;
+}
+
+.live-stage-status .quiet {
+  margin-top: 7px;
+}
+
+.live-stage-status .quiet svg {
+  width: 15px;
+}
+
+.live-meta-on-air {
+  color: #ff7386 !important;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.live-watch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.live-watch-tags span {
+  padding: 6px 9px;
+  border-radius: 7px;
+  color: #85858f;
+  background: #19191e;
+  font-size: 9px;
+}
+
+.watch-page .live-unavailable.compact {
+  min-height: calc(100dvh - 90px);
+  border: 0;
+  border-radius: 0;
+}
+
+.watch-page .live-unavailable .quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.watch-page .live-unavailable .quiet svg {
+  width: 15px;
+}
+
+@media (max-width: 800px) {
+  .theater-stage .live-watch-stage {
+    max-width: calc(177.7778dvh - 128px);
+  }
+}
+
+@keyframes on-air-pulse {
+  50% { box-shadow: 0 0 0 7px rgba(250,64,88,0); }
+}

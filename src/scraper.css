@@ -1,0 +1,51 @@
+.profile-url-row {
+  grid-template-columns: 38px minmax(180px, 1fr) minmax(250px, 300px) auto auto 34px 34px;
+}
+
+.source-scraper-controls {
+  display: grid;
+  grid-template-columns: 1fr 105px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.source-scraper-controls label { min-width: 0; }
+.source-scraper-controls select { height: 32px; padding: 6px; }
+.profile-url-row > .icon-button { margin: 0; }
+
+.plugin-source-support {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 11px;
+  padding: 9px 10px;
+  border: 1px solid #292930;
+  border-radius: 9px;
+  background: #121216;
+  color: #777782;
+  font-size: 9px;
+}
+
+.plugin-source-support strong { color: #b8b8c1; }
+
+@media (max-width: 900px) {
+  .profile-url-row { grid-template-columns: 38px minmax(0, 1fr) auto auto 34px 34px; }
+  .source-scraper-controls {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    grid-template-columns: minmax(170px, 1fr) 130px;
+  }
+  .profile-url-row > .badge:nth-of-type(2), .profile-url-row > span.badge { display: inline-flex; }
+}
+
+@media (max-width: 720px) {
+  .profile-url-row { grid-template-columns: 34px minmax(0, 1fr) auto 34px; }
+  .source-scraper-controls {
+    display: grid;
+    grid-column: 2 / -1;
+    grid-template-columns: minmax(145px, 1fr) 110px;
+  }
+  .profile-url-row .source-scraper-controls label { display: block; }
+  .profile-url-row > .badge, .profile-url-row > span.badge { display: none; }
+  .profile-url-row > .icon-button[aria-label^="Scrape"] { display: none; }
+}

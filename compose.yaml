@@ -1,0 +1,32 @@
+services:
+  open-easyx:
+    image: ghcr.io/raccommode/open-easyx:latest
+    pull_policy: always
+    container_name: open-easyx
+    restart: unless-stopped
+    ports:
+      - "3210:3210"
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      EASYX_DATA_DIR: /data
+      EASYX_MEDIA_DIR: /media
+      EASYX_EXTERNAL_PLUGINS_DIR: /plugins
+      EASYX_SCAN_INTERVAL_MINUTES: ${EASYX_SCAN_INTERVAL_MINUTES:-10}
+      EASYX_WHISPER_MODEL: ${EASYX_WHISPER_MODEL:-small}
+    volumes:
+      - ./data:/data
+      - ./media:/media
+      - ./plugins-external:/plugins:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/api/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    profiles: ["javlibrary"]
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info

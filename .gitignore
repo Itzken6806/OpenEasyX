@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+media/
+.env
+*.log
+.DS_Store
+coverage/
+plugins-external/
+__pycache__/
+*.pyc

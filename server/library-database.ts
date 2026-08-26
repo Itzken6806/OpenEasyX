@@ -1,0 +1,454 @@
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import fs from "node:fs";
+import path from "node:path";
+import { SUBTITLE_LANGUAGES, subtitleLanguageCodes } from "./subtitles.js";
+
+export type MediaKind = "video" | "image";
+
+export type Media = {
+  id: string;
+  relativePath: string;
+  kind: MediaKind;
+  title: string;
+  performer: string;
+  source: string;
+  extension: string;
+  mimeType: string;
+  size: number;
+  modifiedAt: string;
+  addedAt: string;
+  duration: number;
+  width: number;
+  height: number;
+  favorite: boolean;
+  progressSeconds: number;
+  completed: boolean;
+  viewCount: number;
+  lastViewedAt?: string;
+};
+
+export type LibraryQuery = {
+  q?: string;
+  kind?: MediaKind | "";
+  performer?: string;
+  source?: string;
+  favorite?: boolean;
+  history?: boolean;
+  watched?: "unseen" | "progress" | "unfinished" | "completed" | "";
+  sort?: "recent" | "oldest" | "title" | "largest" | "most-viewed" | "history";
+  page?: number;
+  pageSize?: number;
+};
+
+export type SubtitleSettings = { enabled: boolean; languages: string[] };
+export type DownloaderSettings = { host: string; port: number };
+export const DEFAULT_DOWNLOADER_SETTINGS: DownloaderSettings = { host: "localhost", port: 3210 };
+export type PerformerSummary = { name: string; count: number; videos: number; images: number; coverId: string };
+export type SubtitleTrack = {
+  id: string;
+  mediaId: string;
+  language: string;
+  label: string;
+  origin: "original" | "generated" | "manual";
+  sourceLanguage: string;
+  updatedAt: string;
+};
+
+type IndexedMedia = Omit<Media, "favorite" | "progressSeconds" | "completed" | "viewCount" | "lastViewedAt"> & {
+  metadata: Record<string, unknown>;
+  scanId: string;
+};
+
+export class LibraryDatabase {
+  readonly sqlite: DatabaseSync;
+
+  constructor(dataDir: string) {
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    const databaseFile = path.join(dataDir, "open-easyx-library.sqlite");
+    const legacyFile = path.join(dataDir, "easyx-viewer.sqlite");
+    if (!fs.existsSync(databaseFile) && fs.existsSync(legacyFile)) fs.copyFileSync(legacyFile, databaseFile);
+    this.sqlite = new DatabaseSync(databaseFile);
+    this.sqlite.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+    this.migrate();
+  }
+
+  private migrate() {
+    this.sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS media (
+        id TEXT PRIMARY KEY,
+        relative_path TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK(kind IN ('video','image')),
+        title TEXT NOT NULL,
+        performer TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        extension TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        modified_at TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        duration REAL NOT NULL DEFAULT 0,
+        width INTEGER NOT NULL DEFAULT 0,
+        height INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        last_seen_scan TEXT NOT NULL,
+        missing INTEGER NOT NULL DEFAULT 0,
+        playable INTEGER NOT NULL DEFAULT 1
+      );
+      CREATE INDEX IF NOT EXISTS media_library_idx ON media(missing, kind, modified_at DESC);
+      CREATE INDEX IF NOT EXISTS media_performer_idx ON media(missing, performer COLLATE NOCASE);
+      CREATE TABLE IF NOT EXISTS playback (
+        media_id TEXT PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+        progress_seconds REAL NOT NULL DEFAULT 0,
+        duration REAL NOT NULL DEFAULT 0,
+        view_count INTEGER NOT NULL DEFAULT 0,
+        favorite INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        last_counted_at TEXT,
+        last_viewed_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS subtitle_jobs (
+        media_id TEXT PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+        fingerprint TEXT NOT NULL DEFAULT '',
+        requested_languages_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'queued',
+        source_language TEXT NOT NULL DEFAULT '',
+        source_language_probability REAL NOT NULL DEFAULT 0,
+        progress REAL NOT NULL DEFAULT 0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT NOT NULL DEFAULT '',
+        started_at TEXT,
+        completed_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS subtitle_jobs_status_idx ON subtitle_jobs(status, updated_at);
+      CREATE TABLE IF NOT EXISTS subtitle_tracks (
+        id TEXT NOT NULL,
+        media_id TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+        language TEXT NOT NULL,
+        label TEXT NOT NULL,
+        origin TEXT NOT NULL CHECK(origin IN ('original','generated','manual')),
+        source_language TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(media_id,id)
+      );
+    `);
+    const playbackColumns = new Set((this.sqlite.prepare("PRAGMA table_info(playback)").all() as Array<{ name: string }>).map((column) => column.name));
+    const mediaColumns = new Set((this.sqlite.prepare("PRAGMA table_info(media)").all() as Array<{ name: string }>).map((column) => column.name));
+    if (!mediaColumns.has("playable")) this.sqlite.exec("ALTER TABLE media ADD COLUMN playable INTEGER NOT NULL DEFAULT 1");
+    const needsCompletionBackfill = !playbackColumns.has("completed");
+    if (needsCompletionBackfill) this.sqlite.exec("ALTER TABLE playback ADD COLUMN completed INTEGER NOT NULL DEFAULT 0");
+    if (!playbackColumns.has("last_counted_at")) this.sqlite.exec("ALTER TABLE playback ADD COLUMN last_counted_at TEXT");
+    if (needsCompletionBackfill) this.sqlite.exec("UPDATE playback SET completed=1 WHERE progress_seconds=0 AND view_count>0");
+    this.sqlite.exec("CREATE INDEX IF NOT EXISTS playback_history_idx ON playback(last_viewed_at DESC)");
+  }
+
+  close() {
+    this.sqlite.close();
+  }
+
+  upsertMedia(item: IndexedMedia) {
+    this.sqlite.prepare(`
+      INSERT INTO media(
+        id,relative_path,kind,title,performer,source,extension,mime_type,size,modified_at,
+        added_at,duration,width,height,metadata_json,last_seen_scan,missing
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+      ON CONFLICT(relative_path) DO UPDATE SET
+        kind=excluded.kind,title=excluded.title,performer=excluded.performer,source=excluded.source,
+        extension=excluded.extension,mime_type=excluded.mime_type,size=excluded.size,
+        modified_at=excluded.modified_at,metadata_json=excluded.metadata_json,
+        last_seen_scan=excluded.last_seen_scan,missing=0,
+        playable=CASE WHEN media.size<>excluded.size OR media.modified_at<>excluded.modified_at THEN 1 ELSE media.playable END
+    `).run(
+      item.id, item.relativePath, item.kind, item.title, item.performer, item.source,
+      item.extension, item.mimeType, item.size, item.modifiedAt, item.addedAt,
+      item.duration, item.width, item.height, JSON.stringify(item.metadata), item.scanId,
+    );
+  }
+
+  finishScan(scanId: string) {
+    this.sqlite.prepare("UPDATE media SET missing=1 WHERE last_seen_scan<>? AND missing=0").run(scanId);
+  }
+
+  markMediaMissing(id: string) {
+    return Number(this.sqlite.prepare("UPDATE media SET missing=1 WHERE id=? AND missing=0").run(id).changes) > 0;
+  }
+
+  markMediaUnplayable(id: string) {
+    return Number(this.sqlite.prepare("UPDATE media SET playable=0 WHERE id=? AND playable=1").run(id).changes) > 0;
+  }
+
+  updateProbe(id: string, values: { duration?: number; width?: number; height?: number }) {
+    this.sqlite.prepare(`UPDATE media SET duration=CASE WHEN ?>0 THEN ? ELSE duration END,
+      width=CASE WHEN ?>0 THEN ? ELSE width END,height=CASE WHEN ?>0 THEN ? ELSE height END WHERE id=?`)
+      .run(values.duration ?? 0, values.duration ?? 0, values.width ?? 0, values.width ?? 0, values.height ?? 0, values.height ?? 0, id);
+  }
+
+  private mapMedia(row: Record<string, unknown>): Media {
+    return {
+      id: String(row.id), relativePath: String(row.relative_path), kind: row.kind as MediaKind,
+      title: String(row.title), performer: String(row.performer), source: String(row.source),
+      extension: String(row.extension), mimeType: String(row.mime_type), size: Number(row.size),
+      modifiedAt: String(row.modified_at), addedAt: String(row.added_at), duration: Number(row.effective_duration ?? row.duration),
+      width: Number(row.width), height: Number(row.height), favorite: !!row.favorite,
+      progressSeconds: Number(row.progress_seconds), completed: !!row.completed, viewCount: Number(row.view_count),
+      lastViewedAt: row.last_viewed_at ? String(row.last_viewed_at) : undefined,
+    };
+  }
+
+  getMedia(id: string): Media | undefined {
+    const row = this.sqlite.prepare(`SELECT m.*,COALESCE(NULLIF(m.duration,0),p.duration,0) effective_duration,
+      COALESCE(p.favorite,0) favorite,COALESCE(p.progress_seconds,0) progress_seconds,
+      COALESCE(p.completed,0) completed,COALESCE(p.view_count,0) view_count,p.last_viewed_at
+      FROM media m LEFT JOIN playback p ON p.media_id=m.id WHERE m.id=? AND m.missing=0 AND m.playable=1`).get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapMedia(row) : undefined;
+  }
+
+  listMedia(query: LibraryQuery = {}) {
+    const where = ["m.missing=0", "m.playable=1"];
+    const values: SQLInputValue[] = [];
+    if (query.q?.trim()) {
+      where.push("(m.title LIKE ? ESCAPE '\\' OR m.performer LIKE ? ESCAPE '\\' OR m.source LIKE ? ESCAPE '\\')");
+      const term = `%${query.q.trim().replace(/[\\%_]/g, "\\$&")}%`;
+      values.push(term, term, term);
+    }
+    if (query.kind) { where.push("m.kind=?"); values.push(query.kind); }
+    if (query.performer) { where.push("m.performer=? COLLATE NOCASE"); values.push(query.performer); }
+    if (query.source) { where.push("m.source=? COLLATE NOCASE"); values.push(query.source); }
+    if (query.favorite) where.push("COALESCE(p.favorite,0)=1");
+    if (query.history) where.push("p.last_viewed_at IS NOT NULL");
+    if (query.watched === "unseen") where.push("p.last_viewed_at IS NULL AND COALESCE(p.progress_seconds,0)=0 AND COALESCE(p.view_count,0)=0");
+    if (query.watched === "progress") where.push("COALESCE(p.progress_seconds,0)>0 AND COALESCE(p.completed,0)=0");
+    if (query.watched === "unfinished") where.push("COALESCE(p.completed,0)=0");
+    if (query.watched === "completed") where.push("COALESCE(p.completed,0)=1");
+    const order = {
+      recent: "m.modified_at DESC", oldest: "m.modified_at ASC", title: "m.title COLLATE NOCASE ASC",
+      largest: "m.size DESC", "most-viewed": "COALESCE(p.view_count,0) DESC,m.modified_at DESC",
+      history: "p.last_viewed_at DESC,m.modified_at DESC",
+    }[query.sort ?? "recent"];
+    const pageSize = Math.max(1, Math.min(100, query.pageSize ?? 48));
+    const page = Math.max(1, query.page ?? 1);
+    const clause = where.join(" AND ");
+    const total = Number((this.sqlite.prepare(`SELECT COUNT(*) count FROM media m LEFT JOIN playback p ON p.media_id=m.id WHERE ${clause}`).get(...values) as { count: number }).count);
+    const rows = this.sqlite.prepare(`SELECT m.*,COALESCE(NULLIF(m.duration,0),p.duration,0) effective_duration,
+      COALESCE(p.favorite,0) favorite,COALESCE(p.progress_seconds,0) progress_seconds,
+      COALESCE(p.completed,0) completed,COALESCE(p.view_count,0) view_count,p.last_viewed_at
+      FROM media m LEFT JOIN playback p ON p.media_id=m.id WHERE ${clause}
+      ORDER BY ${order} LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+    return { items: rows.map((row) => this.mapMedia(row)), total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  playlist(query: LibraryQuery = {}) {
+    const where = ["m.missing=0", "m.playable=1"];
+    const values: SQLInputValue[] = [];
+    if (query.q?.trim()) {
+      where.push("(m.title LIKE ? ESCAPE '\\' OR m.performer LIKE ? ESCAPE '\\' OR m.source LIKE ? ESCAPE '\\')");
+      const term = `%${query.q.trim().replace(/[\\%_]/g, "\\$&")}%`;
+      values.push(term, term, term);
+    }
+    if (query.kind) { where.push("m.kind=?"); values.push(query.kind); }
+    if (query.performer) { where.push("m.performer=? COLLATE NOCASE"); values.push(query.performer); }
+    if (query.source) { where.push("m.source=? COLLATE NOCASE"); values.push(query.source); }
+    if (query.favorite) where.push("COALESCE(p.favorite,0)=1");
+    if (query.history) where.push("p.last_viewed_at IS NOT NULL");
+    if (query.watched === "unseen") where.push("p.last_viewed_at IS NULL AND COALESCE(p.progress_seconds,0)=0 AND COALESCE(p.view_count,0)=0");
+    if (query.watched === "progress") where.push("COALESCE(p.progress_seconds,0)>0 AND COALESCE(p.completed,0)=0");
+    if (query.watched === "unfinished") where.push("COALESCE(p.completed,0)=0");
+    if (query.watched === "completed") where.push("COALESCE(p.completed,0)=1");
+    const order = {
+      recent: "m.modified_at DESC", oldest: "m.modified_at ASC", title: "m.title COLLATE NOCASE ASC",
+      largest: "m.size DESC", "most-viewed": "COALESCE(p.view_count,0) DESC,m.modified_at DESC",
+      history: "p.last_viewed_at DESC,m.modified_at DESC",
+    }[query.sort ?? "recent"];
+    return (this.sqlite.prepare(`SELECT m.id FROM media m LEFT JOIN playback p ON p.media_id=m.id
+      WHERE ${where.join(" AND ")} ORDER BY ${order}`).all(...values) as Array<{ id: string }>).map((row) => row.id);
+  }
+
+  setFavorite(id: string, favorite: boolean) {
+    if (!this.getMedia(id)) return undefined;
+    const stamp = new Date().toISOString();
+    this.sqlite.prepare(`INSERT INTO playback(media_id,favorite,updated_at) VALUES(?,?,?)
+      ON CONFLICT(media_id) DO UPDATE SET favorite=excluded.favorite,updated_at=excluded.updated_at`)
+      .run(id, favorite ? 1 : 0, stamp);
+    return this.getMedia(id);
+  }
+
+  updateProgress(id: string, position: number, duration: number, completed = false) {
+    if (!this.getMedia(id)) return undefined;
+    const stamp = new Date().toISOString();
+    const safePosition = Math.max(0, position); const safeDuration = Math.max(0, duration);
+    const isCompleted = completed || (safeDuration > 0 && safePosition / safeDuration >= 0.9);
+    const countThreshold = safeDuration ? Math.min(30, Math.max(3, safeDuration * 0.1)) : 0;
+    const previous = this.sqlite.prepare("SELECT last_counted_at FROM playback WHERE media_id=?").get(id) as { last_counted_at?: string } | undefined;
+    const lastCounted = previous?.last_counted_at ? new Date(previous.last_counted_at).getTime() : 0;
+    const shouldCount = (isCompleted || safePosition >= countThreshold) && (!lastCounted || Date.now() - lastCounted >= 30 * 60_000);
+    this.sqlite.prepare(`INSERT INTO playback(media_id,progress_seconds,duration,view_count,favorite,completed,last_counted_at,last_viewed_at,updated_at)
+      VALUES(?,?,?,?,0,?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET
+      progress_seconds=excluded.progress_seconds,duration=excluded.duration,
+      view_count=playback.view_count+?,completed=excluded.completed,
+      last_counted_at=CASE WHEN ?=1 THEN excluded.last_counted_at ELSE playback.last_counted_at END,
+      last_viewed_at=excluded.last_viewed_at,updated_at=excluded.updated_at`)
+      .run(id, safePosition, safeDuration, shouldCount ? 1 : 0, isCompleted ? 1 : 0, shouldCount ? stamp : null, stamp, stamp,
+        shouldCount ? 1 : 0, shouldCount ? 1 : 0);
+    return this.getMedia(id);
+  }
+
+  stats() {
+    const row = this.sqlite.prepare(`SELECT COUNT(*) total,
+      SUM(CASE WHEN kind='video' THEN 1 ELSE 0 END) videos,
+      SUM(CASE WHEN kind='image' THEN 1 ELSE 0 END) images,
+      COALESCE(SUM(size),0) bytes,
+      COALESCE(SUM(CASE WHEN kind='video' THEN size ELSE 0 END),0) video_bytes,
+      COALESCE(SUM(CASE WHEN kind='image' THEN size ELSE 0 END),0) image_bytes,
+      SUM(CASE WHEN p.last_viewed_at IS NOT NULL OR COALESCE(p.view_count,0)>0 OR COALESCE(p.progress_seconds,0)>0 OR COALESCE(p.completed,0)=1 THEN 1 ELSE 0 END) viewed,
+      SUM(CASE WHEN kind='video' AND (p.last_viewed_at IS NOT NULL OR COALESCE(p.view_count,0)>0 OR COALESCE(p.progress_seconds,0)>0 OR COALESCE(p.completed,0)=1) THEN 1 ELSE 0 END) viewed_videos,
+      SUM(CASE WHEN kind='image' AND (p.last_viewed_at IS NOT NULL OR COALESCE(p.view_count,0)>0 OR COALESCE(p.completed,0)=1) THEN 1 ELSE 0 END) viewed_images,
+      COALESCE(SUM(CASE WHEN kind='video' THEN COALESCE(NULLIF(m.duration,0),p.duration,0) ELSE 0 END),0) library_duration_seconds,
+      COALESCE(SUM(CASE WHEN kind='video' AND COALESCE(p.completed,0)=1 THEN COALESCE(NULLIF(p.duration,0),m.duration,0)
+        WHEN kind='video' THEN CASE
+          WHEN COALESCE(NULLIF(p.duration,0),m.duration,0)>0 THEN MIN(COALESCE(p.progress_seconds,0),COALESCE(NULLIF(p.duration,0),m.duration,0))
+          ELSE COALESCE(p.progress_seconds,0) END ELSE 0 END),0) watched_seconds,
+      COALESCE(SUM(p.view_count),0) views
+      FROM media m LEFT JOIN playback p ON p.media_id=m.id WHERE m.missing=0 AND m.playable=1`).get() as Record<string, number>;
+    const performers = Number((this.sqlite.prepare("SELECT COUNT(DISTINCT performer) count FROM media WHERE missing=0 AND playable=1 AND performer<>''").get() as { count: number }).count);
+    const favorites = Number((this.sqlite.prepare("SELECT COUNT(*) count FROM playback p JOIN media m ON m.id=p.media_id WHERE m.missing=0 AND m.playable=1 AND p.favorite=1").get() as { count: number }).count);
+    const inProgress = Number((this.sqlite.prepare("SELECT COUNT(*) count FROM playback p JOIN media m ON m.id=p.media_id WHERE m.missing=0 AND m.playable=1 AND p.progress_seconds>0 AND p.completed=0").get() as { count: number }).count);
+    const completed = Number((this.sqlite.prepare("SELECT COUNT(*) count FROM playback p JOIN media m ON m.id=p.media_id WHERE m.missing=0 AND m.playable=1 AND p.completed=1").get() as { count: number }).count);
+    return {
+      total: Number(row.total), videos: Number(row.videos), images: Number(row.images), bytes: Number(row.bytes),
+      videoBytes: Number(row.video_bytes), imageBytes: Number(row.image_bytes), viewed: Number(row.viewed),
+      viewedVideos: Number(row.viewed_videos), viewedImages: Number(row.viewed_images),
+      libraryDurationSeconds: Number(row.library_duration_seconds), watchedSeconds: Number(row.watched_seconds),
+      views: Number(row.views), performers, favorites, inProgress, completed,
+    };
+  }
+
+  performers(): PerformerSummary[] {
+    const rows = this.sqlite.prepare(`SELECT collection.performer name,COUNT(*) count,
+      SUM(CASE WHEN collection.kind='video' THEN 1 ELSE 0 END) videos,
+      SUM(CASE WHEN collection.kind='image' THEN 1 ELSE 0 END) images,
+      (SELECT cover.id FROM media cover
+        WHERE cover.missing=0 AND cover.playable=1 AND cover.performer=collection.performer COLLATE NOCASE
+        ORDER BY CASE cover.kind WHEN 'image' THEN 0 ELSE 1 END,cover.modified_at DESC,cover.id ASC LIMIT 1) cover_id
+      FROM media collection WHERE collection.missing=0 AND collection.playable=1 AND collection.performer<>''
+      GROUP BY collection.performer COLLATE NOCASE ORDER BY collection.performer COLLATE NOCASE`).all() as Record<string, unknown>[];
+    return rows.map((row) => ({
+      name: String(row.name), count: Number(row.count), videos: Number(row.videos), images: Number(row.images), coverId: String(row.cover_id),
+    }));
+  }
+
+  facets(query: Pick<LibraryQuery, "performer" | "watched"> = {}) {
+    const performers = this.performers();
+    const where = ["m.missing=0", "m.playable=1", "m.source<>''"];
+    const values: SQLInputValue[] = [];
+    if (query.performer) { where.push("m.performer=? COLLATE NOCASE"); values.push(query.performer); }
+    if (query.watched === "unseen") where.push("p.last_viewed_at IS NULL AND COALESCE(p.progress_seconds,0)=0 AND COALESCE(p.view_count,0)=0");
+    if (query.watched === "progress") where.push("COALESCE(p.progress_seconds,0)>0 AND COALESCE(p.completed,0)=0");
+    if (query.watched === "unfinished") where.push("COALESCE(p.completed,0)=0");
+    if (query.watched === "completed") where.push("COALESCE(p.completed,0)=1");
+    const sources = this.sqlite.prepare(`SELECT m.source name,COUNT(*) count FROM media m
+      LEFT JOIN playback p ON p.media_id=m.id WHERE ${where.join(" AND ")}
+      GROUP BY m.source COLLATE NOCASE ORDER BY m.source COLLATE NOCASE`).all(...values);
+    return { performers, sources };
+  }
+
+  subtitleSettings(): SubtitleSettings {
+    const row = this.sqlite.prepare("SELECT value_json FROM settings WHERE key='subtitles'").get() as { value_json: string } | undefined;
+    if (!row) return { enabled: false, languages: [] };
+    try {
+      const value = JSON.parse(row.value_json) as Partial<SubtitleSettings>;
+      return {
+        enabled: value.enabled === true,
+        languages: Array.isArray(value.languages) ? [...new Set(value.languages.filter((item): item is string => typeof item === "string" && subtitleLanguageCodes.has(item)))].sort() : [],
+      };
+    } catch { return { enabled: false, languages: [] }; }
+  }
+
+  storedDownloaderSettings(): DownloaderSettings | undefined {
+    const row = this.sqlite.prepare("SELECT value_json FROM settings WHERE key='downloader'").get() as { value_json: string } | undefined;
+    if (!row) return undefined;
+    try {
+      const value = JSON.parse(row.value_json) as Partial<DownloaderSettings>;
+      if (typeof value.host !== "string" || !value.host.trim() || !Number.isInteger(value.port) || Number(value.port) < 1 || Number(value.port) > 65535) return undefined;
+      return { host: value.host.trim(), port: Number(value.port) };
+    } catch { return undefined; }
+  }
+
+  downloaderSettings(): DownloaderSettings {
+    return this.storedDownloaderSettings() ?? { ...DEFAULT_DOWNLOADER_SETTINGS };
+  }
+
+  setDownloaderSettings(value: DownloaderSettings) {
+    const normalized: DownloaderSettings = { host: value.host.trim(), port: Math.floor(value.port) };
+    const stamp = new Date().toISOString();
+    this.sqlite.prepare(`INSERT INTO settings(key,value_json,updated_at) VALUES('downloader',?,?)
+      ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`)
+      .run(JSON.stringify(normalized), stamp);
+    return normalized;
+  }
+
+  setSubtitleSettings(value: SubtitleSettings) {
+    const normalized: SubtitleSettings = {
+      enabled: value.enabled === true,
+      languages: [...new Set(value.languages.filter((item) => subtitleLanguageCodes.has(item)))].sort(),
+    };
+    const stamp = new Date().toISOString();
+    this.sqlite.prepare(`INSERT INTO settings(key,value_json,updated_at) VALUES('subtitles',?,?)
+      ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`)
+      .run(JSON.stringify(normalized), stamp);
+    return normalized;
+  }
+
+  subtitleTracks(mediaId: string): SubtitleTrack[] {
+    return (this.sqlite.prepare(`SELECT id,media_id,language,label,origin,source_language,updated_at
+      FROM subtitle_tracks WHERE media_id=? ORDER BY CASE origin WHEN 'original' THEN 0 WHEN 'manual' THEN 1 ELSE 2 END,label COLLATE NOCASE`)
+      .all(mediaId) as Record<string, unknown>[]).map((row) => ({
+        id: String(row.id), mediaId: String(row.media_id), language: String(row.language), label: String(row.label),
+        origin: row.origin as SubtitleTrack["origin"], sourceLanguage: String(row.source_language), updatedAt: String(row.updated_at),
+      }));
+  }
+
+  subtitleStatus(mediaId: string) {
+    const media = this.getMedia(mediaId);
+    if (!media) return undefined;
+    if (media.kind !== "video") return { status: "not_applicable", progress: 0, sourceLanguage: "", error: "", tracks: [] };
+    const job = this.sqlite.prepare("SELECT * FROM subtitle_jobs WHERE media_id=?").get(mediaId) as Record<string, unknown> | undefined;
+    const tracks = this.subtitleTracks(mediaId).map((track) => ({ ...track, url: `/api/media/${mediaId}/subtitles/${track.id}.vtt` }));
+    return {
+      status: job ? String(job.status) : this.subtitleSettings().enabled ? "queued" : "disabled",
+      progress: job ? Number(job.progress) : 0,
+      sourceLanguage: job ? String(job.source_language) : "",
+      error: job ? String(job.last_error) : "",
+      tracks,
+    };
+  }
+
+  upsertSubtitleTrack(mediaId: string, id: string, language: string, label: string, origin: SubtitleTrack["origin"], sourceLanguage = "") {
+    const stamp = new Date().toISOString();
+    this.sqlite.prepare(`INSERT INTO subtitle_tracks(id,media_id,language,label,origin,source_language,updated_at)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(media_id,id) DO UPDATE SET language=excluded.language,label=excluded.label,
+      origin=excluded.origin,source_language=excluded.source_language,updated_at=excluded.updated_at`)
+      .run(id, mediaId, language, label, origin, sourceLanguage, stamp);
+    return this.subtitleTracks(mediaId).find((track) => track.id === id);
+  }
+
+  subtitleOverview() {
+    const counts = this.sqlite.prepare(`SELECT COUNT(*) total,
+      SUM(CASE WHEN status='complete' THEN 1 ELSE 0 END) complete,
+      SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END) pending,
+      SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) errors FROM subtitle_jobs`).get() as Record<string, number>;
+    const runtime = this.sqlite.prepare("SELECT value_json FROM settings WHERE key='subtitle_worker_runtime'").get() as { value_json: string } | undefined;
+    let worker: Record<string, unknown> = {};
+    try { worker = runtime ? JSON.parse(runtime.value_json) as Record<string, unknown> : {}; } catch { /* Ignore a partial heartbeat write. */ }
+    return {
+      settings: this.subtitleSettings(), languages: SUBTITLE_LANGUAGES,
+      counts: { total: Number(counts.total ?? 0), complete: Number(counts.complete ?? 0), pending: Number(counts.pending ?? 0), errors: Number(counts.errors ?? 0) },
+      worker,
+    };
+  }
+}

@@ -1,0 +1,81 @@
+# Open EasyX
+
+Open EasyX is one private, self-hosted application for discovering, downloading, organizing, browsing, and playing media. It is the real code-level merger of EasyX Downloader and EasyX Viewer: one Node server, one React application, one Docker container, one media volume.
+
+## What is included
+
+- performer discovery and source association;
+- automatic and manual download queues;
+- isolated partial downloads in `media/.downloads`, with restart-from-zero recovery;
+- an indexed video and photo library with favorites, history, progress, previews, and statistics;
+- direct live-cam aggregation and playback from installed source plugins;
+- local subtitle transcription and translation;
+- an official, built-in plugin store;
+- additional plugin repositories from GitHub, Gitea, Forgejo, GitLab, or any compatible HTTP(S), SSH, or Git remote;
+- integrated browser login for plugins that need an authenticated session.
+
+No Viewer service, bridge plugin, iframe, or second application runs behind Open EasyX.
+
+## Start with Docker Compose
+
+```bash
+mkdir -p data media plugins-external
+docker compose up -d
+```
+
+Open [http://localhost:3210](http://localhost:3210). The default Compose project starts one container named `open-easyx`.
+
+Completed media is organized below `/media/<performer>/<source>/`. Active transfers stay below `/media/.downloads` and are never exposed to the library. On restart, interrupted transfers are discarded and queued again from zero.
+
+## Local development
+
+Requirements: Node.js 22.5 or newer, Git, FFmpeg, and the downloader helpers used by the plugins you enable.
+
+```bash
+npm install
+npm run dev
+```
+
+Run the full validation suite with:
+
+```bash
+npm run check
+```
+
+## Plugins and stores
+
+Plugins are grouped in the UI by what they add:
+
+- **Sources & discovery** — identity search, source discovery, scraping, and download resolution;
+- **Live cam** — live directories and stream resolution;
+- **Features & addons** — library hooks and other local features.
+
+The official store lives in `plugins/` and cannot be removed. In **Plugins → Repositories**, an administrator can install another Git repository URL. Open EasyX validates and clones it into `/data/plugin-repositories`, loads plugins from either its root or `plugins/`, and lets the administrator update or remove that repository later.
+
+See [docs/PLUGINS.md](docs/PLUGINS.md) for the SDK contract and community repository layout.
+
+## Persistent paths
+
+| Container path | Purpose |
+| --- | --- |
+| `/data` | databases, sessions, plugin repository checkouts, thumbnails, subtitles, and models |
+| `/media` | completed media library plus private `.downloads` staging |
+| `/plugins` | optional legacy read-only local plugin folder |
+
+Important environment variables include `PUID`, `PGID`, `EASYX_SCAN_INTERVAL_MINUTES`, `EASYX_WHISPER_MODEL`, `EASYX_TRANSLATION_MODEL`, and `EASYX_LOG_LEVEL`.
+
+## Container publishing
+
+Every push and pull request runs tests, TypeScript, the production web build, a Docker build, and runtime checks. Successful pushes publish multi-architecture images to `ghcr.io/raccommode/open-easyx` with `latest`, branch, tag, and commit SHA tags.
+
+## Migrating existing installations
+
+Mount the existing Downloader media folder as `/media` and its data folder as `/data`. Open EasyX keeps the Downloader database format. If an `easyx-viewer.sqlite` file is also present in `/data`, it is copied once to `open-easyx-library.sqlite` so viewing history and favorites are retained without modifying the source database.
+
+## Responsible use
+
+Only download, retain, and view material you are legally authorized to access. Third-party plugins execute trusted server-side code; review their source before installation.
+
+## License
+
+[MIT](LICENSE)

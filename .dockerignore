@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+media
+plugins-external
+.git
+.github
+*.log
+.DS_Store
+coverage
