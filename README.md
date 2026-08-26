@@ -14,7 +14,7 @@ Open EasyX is one private, self-hosted application for discovering, downloading,
 - additional plugin repositories from GitHub, Gitea, Forgejo, GitLab, or any compatible HTTP(S), SSH, or Git remote;
 - integrated browser login for plugins that need an authenticated session.
 
-No Viewer service, bridge plugin, iframe, or second application runs behind Open EasyX.
+No bridge, iframe, or second application runs behind Open EasyX.
 
 ## Start with Docker Compose
 
