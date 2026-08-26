@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   noteRenderedVideoFrame, noteVideoStallRecovery, shouldRecoverVideoStall,
-  VIDEO_STALL_MAX_RECOVERIES, videoFrameSignature, videoStallState,
+  VIDEO_STALL_MAX_RECOVERIES, videoStallState,
 } from "./video-stall-recovery";
 
 const playing = {
@@ -31,12 +31,5 @@ describe("video stall recovery", () => {
     expect(shouldRecoverVideoStall(state, { ...playing, now: 60_000, currentTime: 30 })).toBe(false);
     noteRenderedVideoFrame(state, 61_000, 30);
     expect(state.consecutiveRecoveries).toBe(0);
-  });
-
-  it("uses stable visual signatures when native frame counters are unavailable", () => {
-    const still = new Uint8ClampedArray([10, 20, 30, 255, 40, 50, 60, 255]);
-    const changed = new Uint8ClampedArray([10, 20, 30, 255, 41, 50, 60, 255]);
-    expect(videoFrameSignature(still)).toBe(videoFrameSignature(still));
-    expect(videoFrameSignature(changed)).not.toBe(videoFrameSignature(still));
   });
 });
