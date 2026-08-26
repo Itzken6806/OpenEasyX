@@ -1,6 +1,6 @@
 # Open EasyX
 
-Open EasyX is one private, self-hosted application for discovering, downloading, organizing, browsing, and playing media. It is the real code-level merger of EasyX Downloader and EasyX Viewer: one Node server, one React application, one Docker container, one media volume.
+Open EasyX is one private, self-hosted application for discovering, downloading, organizing, browsing, and playing media: one Node server, one React application, one Docker container, and one media volume.
 
 ## What is included
 
@@ -67,10 +67,6 @@ Important environment variables include `PUID`, `PGID`, `EASYX_SCAN_INTERVAL_MIN
 ## Container publishing
 
 Every push and pull request runs tests, TypeScript, the production web build, a Docker build, and runtime checks. Successful pushes publish multi-architecture images to `ghcr.io/raccommode/open-easyx` with `latest`, branch, tag, and commit SHA tags.
-
-## Migrating existing installations
-
-Mount the existing Downloader media folder as `/media` and its data folder as `/data`. Open EasyX keeps the Downloader database format. If an `easyx-viewer.sqlite` file is also present in `/data`, it is copied once to `open-easyx-library.sqlite` so viewing history and favorites are retained without modifying the source database.
 
 ## Responsible use
 
