@@ -16,6 +16,16 @@ Open EasyX is one private, self-hosted application for discovering, downloading,
 
 No bridge, iframe, or second application runs behind Open EasyX.
 
+## Screenshots
+
+### One optimized navigation and media library
+
+![Open EasyX media library](docs/screenshots/library.jpg)
+
+### Built-in and community plugin stores
+
+![Open EasyX plugin repositories](docs/screenshots/plugins.jpg)
+
 ## Start with Docker Compose
 
 ```bash
