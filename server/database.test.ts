@@ -10,6 +10,17 @@ function createDb() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "easyx-t
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe("Database", () => {
+  it("queues discovered media by default without overriding a saved preference", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "easyx-test-")); dirs.push(dir);
+    const initial = new Database(dir);
+    expect(initial.getSettings().autoQueueDiscovered).toBe(true);
+    initial.updateSettings({ autoQueueDiscovered: false });
+    initial.sqlite.close();
+
+    const reopened = new Database(dir);
+    expect(reopened.getSettings().autoQueueDiscovered).toBe(false);
+  });
+
   it("migrates pre-scraper databases without losing source schedules", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "easyx-test-")); dirs.push(dir);
     const sqlite = new DatabaseSync(path.join(dir, "easyx.sqlite"));
@@ -129,6 +140,7 @@ describe("Database", () => {
 
   it("paginates and filters every activity item", () => {
     const db = createDb(); const person = db.createPerformer({ name: "Paged Creator" });
+    db.updateSettings({ autoQueueDiscovered: false });
     const source = db.addSource(person.id, "plugin.one", { externalId: "s", label: "Main feed", profileUrl: "https://example.test", domain: "example.test" });
     db.ingestItems(source, Array.from({ length: 65 }, (_, index) => ({
       externalId: `media-${index}`, title: `Media ${index}`, mediaType: index % 2 ? "video" : "image",
@@ -169,6 +181,7 @@ describe("Database", () => {
 
   it("requeues every failed item and clears stale retry state", () => {
     const db = createDb(); const person = db.createPerformer({ name: "Retries" });
+    db.updateSettings({ autoQueueDiscovered: false });
     const source = db.addSource(person.id, "plugin.one", { externalId: "s", label: "Feed", profileUrl: "https://example.test", domain: "example.test" });
     db.ingestItems(source, [
       { externalId: "failed-one", mediaType: "video" }, { externalId: "failed-two", mediaType: "image" }, { externalId: "available", mediaType: "image" },

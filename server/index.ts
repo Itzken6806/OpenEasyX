@@ -229,11 +229,38 @@ const candidateSchema = z.object({
   imageUrl: z.string().url().optional(), profileUrls: z.array(z.string().url()).optional(), metadata: z.record(z.string(), z.unknown()).optional(),
 });
 const discoveryMatchSchema = z.object({ pluginId: z.string().min(1), candidate: candidateSchema });
+const localPerformerImageUrl = z.string().regex(/^\/api\/media\/[a-f0-9]{24}\/thumbnail$/, "Invalid local performer image");
+const storedPerformerImageUrl = z.string().regex(/^\/api\/performers\/person_[a-f0-9]{20}\/image$/, "Invalid stored performer image");
 const performerEditorSchema = z.object({
   name: z.string().trim().min(1).max(160), aliases: z.array(z.string().trim().min(1).max(160)).max(100).default([]),
-  imageUrl: z.union([z.string().url(), z.literal(""), z.null()]).optional(),
+  imageUrl: z.union([z.string().url().max(4096), localPerformerImageUrl, storedPerformerImageUrl, z.literal(""), z.null()]).optional(),
 });
 const manualPluginId = "org.easyx.manual";
+const performerImagesDir = path.join(dataDir, "performer-images");
+
+function performerImageFile(performerId: string) {
+  return path.join(performerImagesDir, `${performerId}.jpg`);
+}
+
+async function resolvePerformerImageUrl(performerId: string, previousName: string, nextName: string, imageUrl?: string | null) {
+  const storedUrl = `/api/performers/${performerId}/image`;
+  if (imageUrl === storedUrl) return storedUrl;
+  const selected = /^\/api\/media\/([a-f0-9]{24})\/thumbnail$/.exec(imageUrl ?? "");
+  if (selected) {
+    const media = libraryDb.getMedia(selected[1]);
+    const performerNames = new Set([previousName, nextName].map((value) => value.toLocaleLowerCase()));
+    if (!media || media.kind !== "image" || !performerNames.has(media.performer.toLocaleLowerCase())) {
+      throw Object.assign(new Error("The selected image does not belong to this performer"), { statusCode: 400 });
+    }
+    fs.mkdirSync(performerImagesDir, { recursive: true, mode: 0o700 });
+    const target = performerImageFile(performerId); const temporary = `${target}.${process.pid}.tmp`;
+    try { fs.copyFileSync(await catalog.thumbnail(media), temporary); fs.renameSync(temporary, target); }
+    finally { fs.rmSync(temporary, { force: true }); }
+    return storedUrl;
+  }
+  fs.rmSync(performerImageFile(performerId), { force: true });
+  return imageUrl || null;
+}
 
 function ensureSourcePlugin(pluginId: string) {
   if (pluginId === manualPluginId) return;
@@ -288,10 +315,18 @@ app.post<{ Body: unknown }>("/api/performers/import", async (request) => {
 app.get("/api/performers", async () => db.listPerformers());
 app.post<{ Body: unknown }>("/api/performers", async (request) => {
   const body = performerEditorSchema.parse(request.body);
+  if (typeof body.imageUrl === "string" && body.imageUrl.startsWith("/api/")) throw Object.assign(new Error("Choose a local image after creating the performer"), { statusCode: 400 });
   if (db.getPerformerByName(body.name)) throw Object.assign(new Error("A performer with this name already exists"), { statusCode: 409 });
   const performer = db.createPerformer({ ...body, imageUrl: body.imageUrl || null });
   ensurePerformerDirectory(mediaDir, performer.name);
   return performer;
+});
+app.get<{ Params: { id: string } }>("/api/performers/:id/image", async (request, reply) => {
+  const performer = db.getPerformer(request.params.id);
+  if (!performer) throw Object.assign(new Error("Performer not found"), { statusCode: 404 });
+  const file = performerImageFile(performer.id);
+  if (!fs.existsSync(file)) return reply.status(404).send({ error: "Performer image not found" });
+  return reply.type("image/jpeg").header("cache-control", "private, no-cache").send(fs.createReadStream(file));
 });
 app.get<{ Params: { id: string } }>("/api/performers/:id", async (request) => {
   const performer = db.getPerformer(request.params.id);
@@ -304,7 +339,8 @@ app.patch<{ Params: { id: string }; Body: unknown }>("/api/performers/:id", asyn
   const body = performerEditorSchema.parse(request.body);
   const sameName = db.getPerformerByName(body.name);
   if (sameName && sameName.id !== current.id) throw Object.assign(new Error("A performer with this name already exists"), { statusCode: 409 });
-  const performer = db.updatePerformer(current.id, { ...body, imageUrl: body.imageUrl || null })!;
+  const imageUrl = await resolvePerformerImageUrl(current.id, current.name, body.name, body.imageUrl);
+  const performer = db.updatePerformer(current.id, { ...body, imageUrl })!;
   renamePerformerDirectory(mediaDir, current.name, performer.name);
   return performer;
 });
@@ -377,6 +413,7 @@ app.delete<{ Params: { id: string }; Body: unknown }>("/api/performers/:id", asy
   }
   const deletedFiles = body.deleteFiles ? deletePerformerFiles(mediaDir, performer, items) : 0;
   db.deletePerformer(performer.id);
+  fs.rmSync(performerImageFile(performer.id), { force: true });
   return { deleted: true, deletedFiles, filesKept: !body.deleteFiles };
 });
 

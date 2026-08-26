@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Aperture, BarChart3, Clock3, Eye, Film, FolderSearch2, HardDrive, Heart, History, Image as ImageIcon,
+  Aperture, BarChart3, ChevronLeft, ChevronRight, Clock3, Eye, Film, FolderSearch2, HardDrive, Heart, History, Image as ImageIcon,
   Library as LibraryIcon, ListChecks, LoaderCircle, Menu, Play, RefreshCw, Search, SlidersHorizontal, Sparkles,
   Radio, Settings as SettingsIcon, Square, CheckSquare, Trash2, UserRound, Users, X,
 } from "lucide-react";
@@ -23,7 +23,7 @@ type Stats = {
   viewed: number; viewedVideos: number; viewedImages: number; libraryDurationSeconds: number; watchedSeconds: number;
   views: number; performers: number; favorites: number; inProgress: number; completed: number;
 };
-type Dashboard = { stats: Stats; scan: Scan; featured?: Media; featuredReason: "continue" | "recent"; continueWatching: Media[]; oldestUnfinished: Media[]; recentVideos: Media[]; recentImages: Media[]; favorites: Media[] };
+type Dashboard = { stats: Stats; scan: Scan; featured?: Media; featuredReason: "continue" | "recent"; continueWatching: Media[]; oldestUnfinished: Media[]; recentContent: Media[]; recentVideos: Media[]; recentImages: Media[]; favorites: Media[] };
 type Scan = { running: boolean; indexed: number; lastScanAt: string; error: string };
 type LibraryResult = { items: Media[]; total: number; page: number; pageSize: number; pages: number };
 type Performer = { name: string; count: number; videos: number; images: number; coverId?: string; coverUrl?: string };
@@ -213,7 +213,7 @@ export function LibraryApp() {
   if (!dashboard) return <div className="boot"><span className="logo">EX</span><LoaderCircle className="spin"/><p>Opening your private library…</p></div>;
   return <div className="library-mode"><div className="app-shell">
     <aside className={mobileNav ? "sidebar open" : "sidebar"}>
-      <a className="brand brand-wordmark" href="/overview"><span><b>Open EasyX</b><small>ONE PRIVATE SUITE</small></span></a>
+      <a className="brand brand-wordmark" href="/media"><span><b>Open EasyX</b><small>ONE PRIVATE SUITE</small></span></a>
       <UnifiedNavigation/>
       <div className="storage"><HardDrive/><div><b>{formatBytes(dashboard.stats.bytes)}</b><small>{dashboard.stats.total.toLocaleString()} local files</small></div></div>
       <div className="sidebar-foot"><span className={dashboard.scan.running ? "status scanning" : "status"}></span><div><b>{dashboard.scan.running ? "Indexing library" : "Library online"}</b><small>{dashboard.scan.lastScanAt ? `Scanned ${timeAgo(dashboard.scan.lastScanAt)}` : "First scan pending"}</small></div></div>
@@ -241,11 +241,7 @@ export function LibraryApp() {
 
 function Home({ dashboard, open, go, favorite }: { dashboard: Dashboard; open: OpenMedia; go: (page: Page, preset?: LibraryPreset) => void; favorite: (media: Media, value: boolean) => void }) {
   return <>
-    {dashboard.featured ? <section className="hero">
-      <img src={dashboard.featured.thumbnailUrl} alt="" decoding="async" fetchPriority="high"/>
-      <div className="hero-shade"></div><div className="hero-copy"><span><Sparkles/>{dashboard.featuredReason === "continue" ? "CONTINUE WATCHING" : "RECENTLY ADDED"}</span><h2>{dashboard.featured.title}</h2><p>{dashboard.featured.performer || "Unsorted"}{dashboard.featured.source ? ` - ${sourceDomain(dashboard.featured.source)}` : ""}</p>
-      <div><button className="primary big" onClick={() => open(dashboard.featured!, { ids: (dashboard.featuredReason === "continue" ? dashboard.continueWatching : dashboard.recentVideos).map((item) => item.id) })}><Play/>{dashboard.featuredReason === "continue" ? "Resume" : "Play now"}</button><button className="glass" onClick={() => void favorite(dashboard.featured!, !dashboard.featured!.favorite)}><Heart className={dashboard.featured.favorite ? "filled" : ""}/>{dashboard.featured.favorite ? "Saved" : "Add to favorites"}</button></div></div>
-    </section> : <EmptyLibrary scan={dashboard.scan}/>}
+    {dashboard.recentContent.length ? <RecentCarousel items={dashboard.recentContent} open={open} favorite={favorite}/> : <EmptyLibrary scan={dashboard.scan}/>}
     <section className="stat-row"><Stat icon={Film} label="Videos" value={dashboard.stats.videos}/><Stat icon={ImageIcon} label="Photos" value={dashboard.stats.images}/></section>
     <Shelf title="Continue watching" subtitle="Videos you started but have not finished" items={dashboard.continueWatching} open={open} favorite={favorite} all={() => go("library", { kind: "video", watched: "progress", sort: "history" })}/>
     <Shelf title="Oldest unfinished videos" subtitle="Work through the oldest videos that are not completed yet" items={dashboard.oldestUnfinished} open={open} favorite={favorite} all={() => go("library", { kind: "video", watched: "unfinished", sort: "oldest" })}/>
@@ -253,6 +249,25 @@ function Home({ dashboard, open, go, favorite }: { dashboard: Dashboard; open: O
     <Shelf title="Recently added photos" subtitle="The newest photos in your collection" items={dashboard.recentImages} open={open} favorite={favorite} all={() => go("library", { kind: "image", sort: "recent" })}/>
     {dashboard.favorites.length > 0 && <Shelf title="Your favorites" subtitle="Saved for later" items={dashboard.favorites} open={open} favorite={favorite} all={() => go("favorites")}/>}
   </>;
+}
+
+export function RecentCarousel({ items, open, favorite }: { items: Media[]; open: OpenMedia; favorite: (media: Media, value: boolean) => void }) {
+  const [index, setIndex] = useState(0); const [paused, setPaused] = useState(false);
+  useEffect(() => { setIndex((current) => Math.min(current, Math.max(0, items.length - 1))); }, [items.length]);
+  useEffect(() => {
+    if (paused || items.length < 2) return;
+    const timer = window.setInterval(() => setIndex((current) => (current + 1) % items.length), 8000);
+    return () => window.clearInterval(timer);
+  }, [items.length, paused]);
+  if (!items.length) return null;
+  const current = items[index]; const ids = items.map((item) => item.id);
+  const move = (direction: number) => setIndex((value) => (value + direction + items.length) % items.length);
+  return <section className="hero home-carousel" aria-roledescription="carousel" aria-label="Latest content" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+    <img key={current.id} src={current.thumbnailUrl} alt="" decoding="async" fetchPriority="high"/>
+    <div className="hero-shade"></div><div className="hero-copy"><span><Sparkles/>LATEST CONTENT · {current.kind === "video" ? "VIDEO" : "PHOTO"}</span><h2>{current.title}</h2><p>{current.performer || "Unsorted"}{current.source ? ` - ${sourceDomain(current.source)}` : ""}</p>
+    <div><button className="primary big" onClick={() => open(current, { ids })}>{current.kind === "video" ? <Play/> : <ImageIcon/>}{current.kind === "video" ? "Play now" : "View photo"}</button><button className="glass" onClick={() => void favorite(current, !current.favorite)}><Heart className={current.favorite ? "filled" : ""}/>{current.favorite ? "Saved" : "Add to favorites"}</button></div></div>
+    {items.length > 1 && <><div className="home-carousel-controls"><button aria-label="Previous latest content" onClick={() => move(-1)}><ChevronLeft/></button><span>{index + 1} / {items.length}</span><button aria-label="Next latest content" onClick={() => move(1)}><ChevronRight/></button></div><div className="home-carousel-dots">{items.map((item, itemIndex) => <button key={item.id} className={itemIndex === index ? "active" : ""} aria-label={`Show slide ${itemIndex + 1}: ${item.title}`} aria-current={itemIndex === index ? "true" : undefined} onClick={() => setIndex(itemIndex)}/>)}</div></>}
+  </section>;
 }
 
 function Stat({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: number }) {

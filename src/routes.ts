@@ -10,6 +10,11 @@ export const pageRoutes = {
 
 export type PageKey = keyof typeof pageRoutes;
 
+export function canonicalEntryPath(pathname: string): string {
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return normalized === "/" || normalized === "/overview" ? "/media" : pathname;
+}
+
 export function pagePath(page: PageKey): string {
   return pageRoutes[page];
 }

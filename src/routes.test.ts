@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pageFromPath, pagePath } from "./routes.js";
+import { canonicalEntryPath, pageFromPath, pagePath } from "./routes.js";
 
 describe("application routes", () => {
   it.each([
@@ -14,5 +14,12 @@ describe("application routes", () => {
     expect(pageFromPath("/plugins/")).toBe("plugins");
     expect(pageFromPath("/not-a-page")).toBe("dashboard");
     expect(pageFromPath("/")).toBe("dashboard");
+  });
+
+  it("sends the legacy overview entry to Home", () => {
+    expect(canonicalEntryPath("/")).toBe("/media");
+    expect(canonicalEntryPath("/overview")).toBe("/media");
+    expect(canonicalEntryPath("/overview/")).toBe("/media");
+    expect(canonicalEntryPath("/plugins")).toBe("/plugins");
   });
 });

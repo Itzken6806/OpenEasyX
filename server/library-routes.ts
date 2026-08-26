@@ -43,13 +43,14 @@ export function registerLibraryRoutes(app: FastifyInstance<any, any, any, any>, 
   app.get("/api/library-dashboard", async () => {
     const continueWatching = libraryDb.listMedia({ kind: "video", watched: "progress", sort: "history", pageSize: 20 }).items.map(payload);
     const oldestUnfinished = libraryDb.listMedia({ kind: "video", watched: "unfinished", sort: "oldest", pageSize: 20 }).items.map(payload);
+    const recentContent = libraryDb.listMedia({ sort: "recent", pageSize: 20 }).items.map(payload);
     const recentVideos = libraryDb.listMedia({ kind: "video", sort: "recent", pageSize: 20 }).items.map(payload);
     const recentImages = libraryDb.listMedia({ kind: "image", sort: "recent", pageSize: 20 }).items.map(payload);
     return {
       stats: libraryDb.stats(), scan: catalog.status,
       featured: continueWatching[0] ?? recentVideos[0] ?? oldestUnfinished[0] ?? recentImages[0],
       featuredReason: continueWatching.length ? "continue" : "recent",
-      continueWatching, oldestUnfinished, recentVideos, recentImages,
+      continueWatching, oldestUnfinished, recentContent, recentVideos, recentImages,
       favorites: libraryDb.listMedia({ favorite: true, sort: "recent", pageSize: 20 }).items.map(payload),
     };
   });

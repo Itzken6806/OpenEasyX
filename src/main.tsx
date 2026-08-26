@@ -4,7 +4,7 @@ import { Activity, Box, Check, ChevronLeft, ChevronRight, CircleAlert, Clipboard
 import { api } from "./api.js";
 import { activitySourceDomains, downloadTime } from "./activity.js";
 import { pluginFaviconUrl } from "./plugin-icon.js";
-import { pageFromPath, pagePath, type PageKey } from "./routes.js";
+import { canonicalEntryPath, pageFromPath, pagePath, type PageKey } from "./routes.js";
 import { LogsPage } from "./logs.js";
 import { isLibraryRoute, LibraryApp } from "./library-app.js";
 import { UnifiedNavigation } from "./UnifiedNavigation.js";
@@ -18,6 +18,7 @@ import "./unified-navigation.css";
 type Plugin = { manifest: { id: string; name: string; version: string; description: string; author: string; homepage?: string; capabilities: string[]; settings?: Array<{ key: string; label: string; type: string; required?: boolean; default?: unknown; placeholder?: string; help?: string; cookieDomains?: string[]; sessionFormat?: "cookies" | "raw-json" }>; browserAuth?: { loginUrl: string; sessionSetting: string; capture?: "cookies" | "onlyfans" | "manyvids" | "authorization-header"; requestDomains?: string[] }; sourceUrlPatterns?: string[]; fallback?: boolean; polling?: { mode: "periodic" | "live"; defaultIntervalSeconds: number; minimumIntervalSeconds: number } }; installed: boolean; enabled: boolean; config: Record<string, unknown>; origin: string };
 type PluginRepository = { id: string; name: string; url: string; official: boolean; removable: boolean; addedAt: string; updatedAt: string; pluginCount: number };
 type Performer = { id: string; name: string; aliases: string[]; imageUrl?: string; externalRefs: Record<string, string> };
+type LocalPerformerImage = { id: string; title: string; source: string; modifiedAt: string; thumbnailUrl: string };
 type Source = { id: string; performerId: string; pluginId: string; label: string; profileUrl: string; domain: string; enabled: boolean; autoDownload: boolean; scraperPluginId?: string; scrapeEnabled: boolean; syncIntervalSeconds: number; lastSyncedAt?: string; lastError?: string };
 type Item = { id: string; performerId: string; sourceId: string; pluginId: string; title?: string; mediaType: string; status: string; progress: number; downloadedBytes: number; qualityScore: number; expectedBytes?: number; storagePath?: string; error?: string; downloadStartedAt?: string; downloadFinishedAt?: string; updatedAt: string };
 type ActivityData = { items: Item[]; page: number; pageSize: number; total: number; totalPages: number; statusCounts: Record<string, number>; mediaTypes: string[] };
@@ -27,7 +28,7 @@ type DiscoveryResult = { key: string; name: string; aliases: string[]; imageUrl?
 type DiscoveryProvider = { pluginId: string; pluginName: string; ok: boolean; resultCount: number; durationMs: number; error?: string };
 
 const nav = [
-  ["dashboard", "Overview", LayoutDashboard], ["discover", "Discover", Search], ["library", "Performers", Users],
+  ["dashboard", "Home", LayoutDashboard], ["discover", "Discover", Search], ["library", "Performers", Users],
   ["activity", "Activity", Activity], ["logs", "Logs", Terminal], ["plugins", "Plugins", Plug], ["settings", "Settings", Settings],
 ] as const;
 
@@ -119,11 +120,11 @@ function App() {
   if (!dashboard) return <div className="boot"><div className="logo-mark">EX</div><LoaderCircle className="spin"/><span>Starting Open EasyX…</span></div>;
   if (!settings.legalAccepted) return <Welcome onAccept={() => run(() => api("/api/settings", { method: "PUT", body: JSON.stringify({ legalAccepted: true }) }), "Open EasyX activated")} busy={busy}/>;
 
-  const title = nav.find(([key]) => key === page)?.[1] ?? "Overview";
+  const title = nav.find(([key]) => key === page)?.[1] ?? "Home";
   document.title = `${title} · Open EasyX`;
   return <div className="shell">
     <aside className="sidebar">
-      <button className="brand brand-wordmark" onClick={() => navigate("dashboard")}><span><strong>Open EasyX</strong><small>ONE PRIVATE SUITE</small></span></button>
+      <a className="brand brand-wordmark" href="/media"><span><strong>Open EasyX</strong><small>ONE PRIVATE SUITE</small></span></a>
       <UnifiedNavigation/>
       <div className="sidebar-foot"><div className="privacy"><ShieldCheck size={18}/><span><strong>Private by design</strong><small>Your data stays on this server.</small></span></div><span className="version">Open EasyX v1.0.0</span></div>
     </aside>
@@ -215,13 +216,37 @@ function splitAliases(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((alias) => alias.trim()).filter(Boolean))];
 }
 
+async function loadLocalPerformerImages(performerName: string): Promise<LocalPerformerImage[]> {
+  const params = new URLSearchParams({ performer: performerName, kind: "image", sort: "recent", pageSize: "100" });
+  const first = await api<{ items: LocalPerformerImage[]; pages: number }>(`/api/library?${params}`);
+  const images = [...first.items];
+  for (let page = 2; page <= first.pages; page++) {
+    params.set("page", String(page));
+    images.push(...(await api<{ items: LocalPerformerImage[] }>(`/api/library?${params}`)).items);
+  }
+  return images;
+}
+
 function PerformerForm({ performer, close, run }: { performer?: Performer; close: () => void; run: (op: () => Promise<unknown>, msg: string) => Promise<void> }) {
   const [name, setName] = useState(performer?.name ?? ""); const [aliases, setAliases] = useState(performer?.aliases.join(", ") ?? ""); const [imageUrl, setImageUrl] = useState(performer?.imageUrl ?? "");
+  const [pickerOpen, setPickerOpen] = useState(false); const [localImages, setLocalImages] = useState<LocalPerformerImage[]>([]);
+  const [imagesLoaded, setImagesLoaded] = useState(false); const [imagesLoading, setImagesLoading] = useState(false); const [imagesError, setImagesError] = useState("");
+  const selectedImageId = /^\/api\/media\/([a-f0-9]{24})\/thumbnail$/.exec(imageUrl)?.[1];
+  const openImagePicker = async () => {
+    setPickerOpen(true); setImagesError("");
+    if (imagesLoaded || !performer) return;
+    setImagesLoading(true);
+    try { setLocalImages(await loadLocalPerformerImages(performer.name)); setImagesLoaded(true); }
+    catch (error) { setImagesError(error instanceof Error ? error.message : String(error)); }
+    finally { setImagesLoading(false); }
+  };
   const save = () => void run(async () => {
     const result = await api(performer ? `/api/performers/${performer.id}` : "/api/performers", { method: performer ? "PATCH" : "POST", body: JSON.stringify({ name, aliases: splitAliases(aliases), imageUrl: imageUrl.trim() || null }) });
     close(); return result;
   }, performer ? `${name} updated` : `${name} created and media folder prepared`);
-  return <div className="modal-backdrop elevated" onMouseDown={(event) => event.target === event.currentTarget && close()}><div className="modal performer-form-modal"><div className="modal-head"><div><p>{performer ? "EDIT PERFORMER" : "NEW PERFORMER"}</p><h2>{performer ? performer.name : "Add someone manually"}</h2></div><button className="icon-button" aria-label="Close" onClick={close}><X/></button></div><div className="form-stack"><label><span>Name *</span><input autoFocus type="text" value={name} onChange={(event) => setName(event.target.value)} placeholder="Performer name"/></label><label><span>Aliases</span><input type="text" value={aliases} onChange={(event) => setAliases(event.target.value)} placeholder="Separate aliases with commas"/></label><label><span>Image URL</span><input type="text" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://…/portrait.jpg"/><small>Images are loaded with the referrer hidden; invalid or unavailable images use a safe placeholder.</small></label><div className="folder-preview"><FolderOpen/><span><b>Media folder</b><code>/media/{name.trim() || "Performer name"}</code></span></div></div><div className="modal-actions"><button className="secondary" onClick={close}>Cancel</button><button className="primary" disabled={!name.trim()} onClick={save}><Check size={16}/>{performer ? "Save changes" : "Create performer"}</button></div></div></div>;
+  return <><div className="modal-backdrop elevated" onMouseDown={(event) => event.target === event.currentTarget && close()}><div className="modal performer-form-modal"><div className="modal-head"><div><p>{performer ? "EDIT PERFORMER" : "NEW PERFORMER"}</p><h2>{performer ? performer.name : "Add someone manually"}</h2></div><button className="icon-button" aria-label="Close" onClick={close}><X/></button></div><div className="form-stack"><label><span>Name *</span><input autoFocus type="text" value={name} onChange={(event) => setName(event.target.value)} placeholder="Performer name"/></label><label><span>Aliases</span><input type="text" value={aliases} onChange={(event) => setAliases(event.target.value)} placeholder="Separate aliases with commas"/></label>{performer ? <div className="performer-image-field"><span>Profile image</span><button className="performer-image-selector" type="button" onClick={() => void openImagePicker()}><span className="performer-image-preview"><PerformerImage src={imageUrl} alt={performer.name}/></span><span><b>Choose from local images</b><small>Click to browse every downloaded image for this performer.</small></span><ChevronRight/></button></div> : <label><span>Image URL</span><input type="text" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://…/portrait.jpg"/><small>Images are loaded with the referrer hidden; invalid or unavailable images use a safe placeholder.</small></label>}<div className="folder-preview"><FolderOpen/><span><b>Media folder</b><code>/media/{name.trim() || "Performer name"}</code></span></div></div><div className="modal-actions"><button className="secondary" onClick={close}>Cancel</button><button className="primary" disabled={!name.trim()} onClick={save}><Check size={16}/>{performer ? "Save changes" : "Create performer"}</button></div></div></div>
+    {pickerOpen && performer && <div className="modal-backdrop performer-image-picker-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setPickerOpen(false)}><div className="modal performer-image-picker" role="dialog" aria-modal="true" aria-label={`Choose image for ${performer.name}`}><div className="modal-head"><div><p>LOCAL IMAGES</p><h2>Choose a profile image</h2><span>{performer.name}</span></div><button className="icon-button" aria-label="Close image picker" onClick={() => setPickerOpen(false)}><X/></button></div>{imagesLoading ? <div className="performer-image-picker-state"><LoaderCircle className="spin"/><span>Loading local images…</span></div> : imagesError ? <div className="performer-image-picker-state error"><CircleAlert/><span>{imagesError}</span><button className="secondary" onClick={() => { setImagesLoaded(false); void openImagePicker(); }}>Try again</button></div> : localImages.length ? <div className="performer-image-grid">{localImages.map((image) => <button className={selectedImageId === image.id ? "selected" : ""} key={image.id} type="button" aria-label={`Use ${image.title} as profile image`} onClick={() => { setImageUrl(`/api/media/${image.id}/thumbnail`); setPickerOpen(false); }}><PerformerImage src={image.thumbnailUrl} alt={image.title}/><span><b>{image.title}</b><small>{image.source || "Local media"}</small></span>{selectedImageId === image.id && <i><Check/></i>}</button>)}</div> : <div className="performer-image-picker-state"><UserRound/><strong>No local images yet</strong><span>Download or add images for this performer, then scan the library.</span></div>}</div></div>}
+  </>;
 }
 
 function PerformerManager({ performer, sources, items, plugins, close, run }: { performer: Performer; sources: Source[]; items: Item[]; plugins: Plugin[]; close: () => void; run: (op: () => Promise<unknown>, msg: string) => Promise<void> }) {
@@ -235,7 +260,7 @@ function PerformerManager({ performer, sources, items, plugins, close, run }: { 
   if (mode === "add-url") return <SourceForm performer={performer} plugins={plugins} close={() => setMode("details")} run={run}/>;
   if (mode === "delete") return <DeletePerformer performer={performer} fileCount={managedItems.filter((item) => item.storagePath).length} close={() => setMode("details")} deleted={close} run={run}/>;
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && close()}><div className="modal performer-manager"><div className="modal-head"><div><p>PERFORMER</p><h2>Manage profile</h2></div><button className="icon-button" aria-label="Close" onClick={close}><X/></button></div>
-    <section className="performer-profile-head"><div className="performer-portrait"><PerformerImage src={performer.imageUrl} alt={performer.name}/></div><div><h3>{performer.name}</h3><p>{performer.aliases.join(" · ") || "No aliases"}</p><div className="profile-actions"><button className="secondary" onClick={() => setMode("edit")}><Pencil size={14}/>Edit details</button><button className="secondary" onClick={() => void run(() => api(`/api/performers/${performer.id}/refresh`, { method: "POST" }), `${performer.name} refreshed from connected plugins`)}><RefreshCw size={14}/>Refresh details</button></div></div></section>
+    <section className="performer-profile-head"><div className="performer-portrait"><PerformerImage src={performer.imageUrl} alt={performer.name}/></div><div><h3>{performer.name}</h3><p>{performer.aliases.join(" · ") || "No aliases"}</p><div className="profile-actions"><button className="secondary" onClick={() => setMode("edit")}><Pencil size={14}/>Edit details</button></div></div></section>
     <section className="performer-stats"><div><strong>{managedSources.length}</strong><span>Profile URLs</span></div><div><strong>{Object.keys(performer.externalRefs).length}</strong><span>Connected plugins</span></div><div><strong>{managedItems.filter((item) => item.status === "completed").length}</strong><span>Downloaded files</span></div></section>
     <section className="manager-section"><div className="manager-section-head"><div><p>CONNECTED IDENTITIES</p><h3>Provider references</h3></div></div>{Object.entries(performer.externalRefs).length ? <div className="identity-list">{Object.entries(performer.externalRefs).map(([pluginId, externalId]) => <div key={pluginId}><span className="plugin-logo small">{pluginName(pluginId).slice(0, 2).toUpperCase()}</span><div><strong>{pluginName(pluginId)}</strong><code>{externalId}</code></div><span className="badge completed">Connected</span></div>)}</div> : <p className="manager-empty">This performer was added manually and has no provider identity yet.</p>}</section>
     <section className="manager-section"><div className="manager-section-head"><div><p>PROFILE URLS</p><h3>Sources and scraper selection</h3></div><button className="secondary" onClick={() => setMode("add-url")}><Plus size={14}/>Add URL</button></div>{!scraperPlugins.length && <div className="scraper-notice"><Plug size={16}/><span><strong>No scraper plugin is active</strong><small>URLs stay as references until you install a plugin with media-listing support.</small></span></div>}{managedSources.length ? <div className="profile-url-list">{managedSources.map((source) => {
@@ -432,4 +457,6 @@ function SettingsPage({ settings, run, setNotice }: { settings: Record<string, a
 function ItemList({ items, performers }: { items: Item[]; performers: Performer[] }) { return <div className="item-list">{items.map((item) => <div key={item.id}><span className={`media-icon ${item.mediaType}`}><Download/></span><div><strong>{item.title || item.id}</strong><small>{performers.find((p) => p.id === item.performerId)?.name ?? "Unknown performer"}</small></div><span className={`badge ${item.status}`}>{item.status}</span><time>{timeAgo(item.updatedAt)}</time></div>)}</div>; }
 function Empty({ icon: Icon, title, text, action, onAction }: { icon: any; title: string; text: string; action?: string; onAction?: () => void }) { return <div className="empty"><span><Icon/></span><h3>{title}</h3><p>{text}</p>{action && <button className="secondary" onClick={onAction}>{action}</button>}</div>; }
 
+const entryPath = canonicalEntryPath(window.location.pathname);
+if (entryPath !== window.location.pathname) window.history.replaceState(window.history.state, "", `${entryPath}${window.location.search}${window.location.hash}`);
 createRoot(document.getElementById("root")!).render(<React.StrictMode>{isLibraryRoute(window.location.pathname) ? <LibraryApp/> : <App/>}</React.StrictMode>);

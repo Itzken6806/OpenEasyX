@@ -101,7 +101,7 @@ export class Database {
     this.migrateNitterToPublicX();
     this.setDefault("retentionDays", 0);
     this.setDefault("maxConcurrentDownloads", 2);
-    this.setDefault("autoQueueDiscovered", false);
+    this.setDefault("autoQueueDiscovered", true);
     this.setDefault("defaultScrapeIntervalMinutes", 360);
     this.setDefault("defaultLiveIntervalSeconds", 10);
   }
