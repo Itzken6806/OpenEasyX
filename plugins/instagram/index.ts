@@ -1,6 +1,6 @@
 import { definePlugin, type MediaCandidate, type PluginContext } from "../../packages/plugin-sdk/index.js";
 import { browserHtml, decodeHtml, plainHtml } from "../browser-html-utils.js";
-import { directCandidate, downloadRequest, extractHtmlMedia, filterMedia, mediaFilters } from "../media-utils.js";
+import { directCandidate, downloadRequest, extractHtmlMedia, filterMedia, htmlPublishedDate, mediaFilters } from "../media-utils.js";
 
 function mediaExtension(url: string, fallback: string): string {
   try {
@@ -52,6 +52,7 @@ export function instagramPostUrls(html: string, baseUrl = "https://www.instagram
 export function extractInstagramEmbed(html: string, pageUrl: string): MediaCandidate[] {
   const shortcode = postIdentity(pageUrl);
   const title = postTitle(html, `Instagram post ${shortcode}`);
+  const publishedAt = htmlPublishedDate(html);
   const videoUrls = [...new Set(escapedValues(html, "video_url"))];
   const displayUrls = [...new Set(escapedValues(html, "display_url"))];
   const embeddedTags = (html.match(/<img\b[^>]*>/gi) ?? []).filter((tag) => /\bclass=(?:"[^"]*EmbeddedMediaImage[^"]*"|'[^']*EmbeddedMediaImage[^']*')/i.test(tag));
@@ -60,12 +61,12 @@ export function extractInstagramEmbed(html: string, pageUrl: string): MediaCandi
   const candidates: MediaCandidate[] = [];
   imageUrls.forEach((url, index) => {
     const identity = `instagram:${shortcode}:image:${index + 1}`;
-    const item = directCandidate(url, { hint: "image", title, pageUrl });
+    const item = directCandidate(url, { hint: "image", title, pageUrl, publishedAt });
     candidates.push({ ...item, externalId: identity, identityKey: identity, filename: `${shortcode}-${index + 1}.${mediaExtension(url, "jpg")}` });
   });
   videoUrls.forEach((url, index) => {
     const identity = `instagram:${shortcode}:video:${index + 1}`;
-    const item = directCandidate(url, { hint: "video", title, pageUrl });
+    const item = directCandidate(url, { hint: "video", title, pageUrl, publishedAt });
     candidates.push({ ...item, externalId: identity, identityKey: identity, filename: `${shortcode}-${index + 1}.${mediaExtension(url, "mp4")}` });
   });
   return candidates;

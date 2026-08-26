@@ -112,7 +112,10 @@ export function onlyFansCandidates(payloads: OfScraperPayload[], fallbackUsernam
     const postId = String(payload.post_id ?? payload.post?.id ?? "").trim();
     const type = mediaType(payload);
     const extension = type === "image" ? "jpg" : type === "video" ? "mp4" : "bin";
-    const createdAt = text(payload.media?.createdAt) ?? text(payload.media?.postedAt) ?? text(payload.post?.postedAt);
+    const createdAt = text(payload.media?.createdAt) ?? text(payload.media?.created_at)
+      ?? text(payload.media?.postedAt) ?? text(payload.media?.posted_at)
+      ?? text(payload.post?.postedAt) ?? text(payload.post?.posted_at)
+      ?? text(payload.post?.createdAt) ?? text(payload.post?.created_at);
     const expectedBytes = Number(payload.total_size);
     candidates.set(mediaId, {
       externalId: `onlyfans:${mediaId}`,

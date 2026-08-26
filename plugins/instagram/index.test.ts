@@ -10,15 +10,16 @@ describe("public Instagram plugin", () => {
   });
 
   it("extracts a public embed image with a stable post identity", () => {
-    const items = extractInstagramEmbed('<img class="EmbeddedMediaImage" alt="Public photo" src="https://scontent.example/media.jpg">', "https://www.instagram.com/p/ABC_1/");
-    expect(items).toMatchObject([{ externalId: "instagram:ABC_1:image:1", title: "Public photo", mediaType: "image", filename: "ABC_1-1.jpg" }]);
+    const items = extractInstagramEmbed('<time datetime="2024-02-03T10:20:30Z"></time><img class="EmbeddedMediaImage" alt="Public photo" src="https://scontent.example/media.jpg">', "https://www.instagram.com/p/ABC_1/");
+    expect(items).toMatchObject([{ externalId: "instagram:ABC_1:image:1", title: "Public photo", mediaType: "image", filename: "ABC_1-1.jpg", publishedAt: "2024-02-03T10:20:30.000Z" }]);
   });
 
   it("extracts escaped reel URLs without also treating the cover as a photo", () => {
-    const html = String.raw`<img class="EmbeddedMediaImage" src="https://scontent.example/cover.jpg"><script>{\"display_url\":\"https:\\\/\\\/scontent.example\\\/cover.jpg\",\"video_url\":\"https:\\\/\\\/scontent.example\\\/clip.mp4?x=1\\u0026y=2\"}</script>`;
+    const html = String.raw`<img class="EmbeddedMediaImage" src="https://scontent.example/cover.jpg"><script>{\"taken_at_timestamp\":1706955630,\"display_url\":\"https:\\\/\\\/scontent.example\\\/cover.jpg\",\"video_url\":\"https:\\\/\\\/scontent.example\\\/clip.mp4?x=1\\u0026y=2\"}</script>`;
     const items = extractInstagramEmbed(html, "https://www.instagram.com/reel/XYZ-2/");
     expect(items).toMatchObject([{ externalId: "instagram:XYZ-2:video:1", mediaType: "video", filename: "XYZ-2-1.mp4" }]);
     expect(items[0].metadata?.downloadUrl).toBe("https://scontent.example/clip.mp4?x=1&y=2");
+    expect(items[0].publishedAt).toBe("2024-02-03T10:20:30.000Z");
   });
 
   it("requires no Instagram session", () => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Captions, Check, Clock3, Grid3X3, Heart, LoaderCircle, Maximize, Minimize, Pause, Play, Upload, Volume2, VolumeX } from "lucide-react";
 import { api } from "./api";
 import { initialAutoplay, nextMediaId, PHOTO_AUTOPLAY_SECONDS } from "./playback";
+import { monitorVideoStalls } from "./video-stall-recovery";
 import "./player.css";
 import "./photo-player.css";
 import "./watch-page.css";
@@ -107,6 +108,11 @@ export function PlayerViewer({ media, context, autoStart = false, close, favorit
     void refresh(); void api<{ subtitleLanguages: Language[] }>("/api/settings").then((value) => setLanguages(value.subtitleLanguages)).catch(() => {});
     const timer = window.setInterval(refresh, 5000);
     return () => { cancelled = true; window.clearInterval(timer); };
+  }, [media.id, media.kind]);
+  useEffect(() => {
+    const element = video.current;
+    if (media.kind !== "video" || !element) return;
+    return monitorVideoStalls(element);
   }, [media.id, media.kind]);
   useEffect(() => {
     const element = video.current; if (!element?.textTracks) return;

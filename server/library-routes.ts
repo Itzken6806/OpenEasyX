@@ -33,6 +33,20 @@ function payload<T extends { id: string }>(media: T) {
   };
 }
 
+export function parseMediaRange(value: string, size: number): { start: number; end: number } | undefined {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(size) || size <= 0) return undefined;
+  if (!match[1]) {
+    const length = Number(match[2]);
+    if (!Number.isSafeInteger(length) || length <= 0) return undefined;
+    return { start: Math.max(0, size - length), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start < 0 || start >= size || requestedEnd < start) return undefined;
+  return { start, end: Math.min(requestedEnd, size - 1) };
+}
+
 export function registerLibraryRoutes(app: FastifyInstance<any, any, any, any>, libraryDb: LibraryDatabase, catalog: Catalog, downloadDb: Database, dataDir: string) {
   const requiredMedia = (id: string) => {
     const media = libraryDb.getMedia(id);
@@ -138,10 +152,9 @@ export function registerLibraryRoutes(app: FastifyInstance<any, any, any, any>, 
     const range = request.headers.range;
     reply.header("accept-ranges", "bytes").header("content-type", media.mimeType).header("cache-control", "private, max-age=3600");
     if (!range) return reply.header("content-length", stat.size).send(fs.createReadStream(file));
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (!match) return reply.status(416).header("content-range", `bytes */${stat.size}`).send();
-    const start = match[1] ? Number(match[1]) : 0; const end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= stat.size) return reply.status(416).header("content-range", `bytes */${stat.size}`).send();
+    const parsed = parseMediaRange(range, stat.size);
+    if (!parsed) return reply.status(416).header("content-range", `bytes */${stat.size}`).send();
+    const { start, end } = parsed;
     return reply.status(206).header("content-range", `bytes ${start}-${end}/${stat.size}`).header("content-length", end - start + 1).send(fs.createReadStream(file, { start, end }));
   };
   app.get<{ Params: { id: string } }>("/api/media/:id/stream", async (request, reply) => sendMedia(request, reply, request.params.id));

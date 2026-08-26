@@ -15,8 +15,13 @@ describe("OnlyFans plugin", () => {
       post: { id: 123, text: "<p>New photo</p>" },
     }], "fallback")).toMatchObject([{
       externalId: "onlyfans:456", title: "New photo", pageUrl: "https://onlyfans.com/123/creator",
-      mediaType: "image", filename: "456.jpg", expectedBytes: 1200,
+      mediaType: "image", filename: "456.jpg", expectedBytes: 1200, publishedAt: "2026-08-20T10:00:00.000Z",
     }]);
+  });
+
+  it("recognizes snake-case source publication dates", () => {
+    const items = onlyFansCandidates([{ media_id: "456", media: { type: "video" }, post: { posted_at: "2024-02-03T10:20:30Z" } }], "creator");
+    expect(items[0].publishedAt).toBe("2024-02-03T10:20:30.000Z");
   });
 
   it("accepts a native OF-Scraper auth.json", () => {

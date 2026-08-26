@@ -138,7 +138,12 @@ export async function listGalleryMedia(context: PluginContext, sourceUrl: string
       title: text(metadata.caption) ?? text(metadata.content) ?? text(metadata.title) ?? filenameBase,
       pageUrl: stablePage(platform, metadata, sourceUrl),
       mediaType: mediaType(extension, metadata),
-      publishedAt: oldestDate(metadata.date, metadata.date_published, metadata.created_at, metadata.date_created, metadata.upload_date, metadata.timestamp, metadata.created_time),
+      publishedAt: oldestDate(
+        metadata.date, metadata.date_published, metadata.published_at, metadata.published,
+        metadata.created_at, metadata.date_created, metadata.created_time,
+        metadata.upload_date, metadata.uploaded_at, metadata.date_posted, metadata.posted_at,
+        metadata.timestamp,
+      ),
       filename,
       qualityScore: Number(metadata.width ?? 0) * Number(metadata.height ?? 0),
       metadata: { galleryDirectUrl: url, galleryFilename: filenameBase, galleryPlatform: platform },

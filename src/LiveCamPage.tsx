@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type HlsInstance from "hls.js";
 import { AlertTriangle, ArrowLeft, Eye, LoaderCircle, Maximize, Minimize, Pause, Play, Radio, RefreshCw, Search, Server, Users, Volume2, VolumeX } from "lucide-react";
 import { api } from "./api";
+import { monitorVideoStalls } from "./video-stall-recovery";
 import "./player.css";
 import "./watch-page.css";
 import "./live-player.css";
@@ -93,12 +94,22 @@ export function LivePlayer({ cam, close }: { cam: LiveCam; close: () => void }) 
       }
       const { default: Hls } = await import("hls.js"); if (!active) return;
       if (!Hls.isSupported()) { setError("This browser cannot play HLS live streams."); return; }
-      hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 30 }); hls.loadSource(streamUrl); hls.attachMedia(element);
+      hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 30, highBufferWatchdogPeriod: 2, nudgeMaxRetry: 5 }); hls.loadSource(streamUrl); hls.attachMedia(element);
       hls.on(Hls.Events.MANIFEST_PARSED, () => void element.play().catch(() => setWaiting(false)));
-      hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) setError("The live stream stopped or could not be decoded."); });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal || !hls) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; }
+        setError("The live stream stopped or could not be decoded.");
+      });
     };
     void start().catch(() => setError("The live player could not be initialized."));
     return () => { active = false; element.removeEventListener("error", mediaError); hls?.destroy(); element.pause(); element.removeAttribute("src"); element.load(); };
+  }, [streamUrl]);
+  useEffect(() => {
+    const element = video.current;
+    if (!element || !streamUrl) return;
+    return monitorVideoStalls(element);
   }, [streamUrl]);
   return <div className="live-stage live-watch-stage">
     <div ref={player} className={`custom-player live-custom-player ${controls || !playing ? "controls-visible" : "controls-hidden"}`} tabIndex={0} onMouseMove={reveal} onTouchStart={reveal} onMouseLeave={() => playing && setControls(false)}>

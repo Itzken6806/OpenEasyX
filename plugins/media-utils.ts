@@ -50,6 +50,23 @@ function mediaType(url: string, hint?: string): MediaCandidate["mediaType"] {
   return normalized.includes("video") ? "video" : normalized.includes("image") ? "image" : "other";
 }
 
+export function sourcePublishedDate(...values: unknown[]): string | undefined {
+  const dates = values.flatMap((value) => {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return [new Date(value > 10_000_000_000 ? value : value * 1000)];
+    }
+    if (typeof value !== "string" || !value.trim()) return [];
+    const raw = decodeMarkup(value.trim());
+    if (/^\d{10,13}$/.test(raw)) {
+      const stamp = Number(raw);
+      return [new Date(raw.length === 13 ? stamp : stamp * 1000)];
+    }
+    const compact = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+    return [compact ? new Date(`${compact[1]}-${compact[2]}-${compact[3]}T00:00:00Z`) : new Date(raw)];
+  }).filter((date) => !Number.isNaN(date.valueOf()) && date.getUTCFullYear() >= 1900 && date.valueOf() <= Date.now() + 86_400_000);
+  return dates.sort((left, right) => left.valueOf() - right.valueOf())[0]?.toISOString();
+}
+
 export function directCandidate(url: string, options: { hint?: string; title?: string; pageUrl?: string; width?: number; height?: number; expectedBytes?: number; publishedAt?: string } = {}): MediaCandidate {
   const cleanTitle = options.title?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   return {
@@ -101,16 +118,16 @@ export function extractHtmlMedia(html: string, baseUrl: string, pageUrl = baseUr
   return [...found.values()];
 }
 
-function htmlPublishedDate(html: string): string | undefined {
-  const values: string[] = [];
+export function htmlPublishedDate(html: string): string | undefined {
+  const values: unknown[] = [];
   for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag); const key = (attrs.property ?? attrs.name ?? attrs.itemprop ?? "").toLowerCase();
     if (["article:published_time", "datepublished", "uploaddate", "pubdate", "date"].includes(key) && attrs.content) values.push(attrs.content);
   }
   for (const tag of html.match(/<time\b[^>]*>/gi) ?? []) { const value = attributes(tag).datetime; if (value) values.push(value); }
-  for (const match of html.matchAll(/"(?:datePublished|uploadDate|dateCreated)"\s*:\s*"([^"]+)"/gi)) values.push(decodeMarkup(match[1]));
-  return values.map((value) => new Date(value)).filter((date) => !Number.isNaN(date.valueOf()) && date.getUTCFullYear() >= 1900 && date.valueOf() <= Date.now() + 86_400_000)
-    .sort((left, right) => left.valueOf() - right.valueOf())[0]?.toISOString();
+  for (const match of html.matchAll(/\\?"(?:datePublished|uploadDate|dateCreated|taken_at|created_at)\\?"\s*:\s*\\?"([^"]+)\\?"/gi)) values.push(match[1].replace(/\\+$/, ""));
+  for (const match of html.matchAll(/\\?"(?:taken_at_timestamp|created_time|timestamp)\\?"\s*:\s*\\?"?(\d{10,13})/gi)) values.push(match[1]);
+  return sourcePublishedDate(...values);
 }
 
 function xmlValue(block: string, tagName: string): string | undefined {

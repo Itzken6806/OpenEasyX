@@ -105,11 +105,13 @@ describe("DownloadQueue", () => {
     db.setPluginState("test.command", { installed: true, enabled: true });
     const person = db.upsertPerformer({ externalId: "person", name: "Command Performer" }, "test.command");
     const source = db.addSource(person.id, "test.command", { externalId: "source", label: "Source", profileUrl: "https://example.test/profile", domain: "example.test" });
-    db.ingestItems(source, [{ externalId: "clip", pageUrl: "https://example.test/clip", mediaType: "video", filename: "clip.mp4" }]);
+    db.ingestItems(source, [{ externalId: "clip", pageUrl: "https://example.test/clip", mediaType: "video", filename: "clip.mp4", publishedAt: "2021-03-04T12:30:00Z" }]);
     const item = db.listItems()[0]; db.setItemStatus(item.id, "queued");
     const queue = new DownloadQueue(db, manager, mediaDir); queue.start();
     await waitFor(() => db.getItem(item.id)?.status === "completed"); queue.stop();
-    expect(fs.readFileSync(path.join(mediaDir, "Command Performer", "example.test", "clip.mp4"), "utf8")).toBe("command media");
+    const completed = path.join(mediaDir, "Command Performer", "example.test", "clip.mp4");
+    expect(fs.readFileSync(completed, "utf8")).toBe("command media");
+    expect(fs.statSync(completed).mtime.toISOString()).toBe("2021-03-04T12:30:00.000Z");
   });
 
   it("persists command extractor percentage and downloaded bytes while running", async () => {

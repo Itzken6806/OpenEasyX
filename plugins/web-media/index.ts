@@ -1,5 +1,5 @@
 import { definePlugin } from "../../packages/plugin-sdk/index.js";
-import { directCandidate, downloadRequest, extractHtmlMedia, filterMedia, mediaFilters } from "../media-utils.js";
+import { directCandidate, downloadRequest, extractHtmlMedia, filterMedia, mediaFilters, sourcePublishedDate } from "../media-utils.js";
 
 export default definePlugin({
   manifest: {
@@ -24,7 +24,11 @@ export default definePlugin({
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     const finalUrl = response.url || source.profileUrl;
     if (contentType.startsWith("image/") || contentType.startsWith("video/") || contentType.includes("application/zip")) {
-      return filterMedia([directCandidate(finalUrl, { hint: contentType, pageUrl: source.profileUrl, expectedBytes: Number(response.headers.get("content-length") || 0) || undefined })], context.config);
+      return filterMedia([directCandidate(finalUrl, {
+        hint: contentType, pageUrl: source.profileUrl,
+        expectedBytes: Number(response.headers.get("content-length") || 0) || undefined,
+        publishedAt: sourcePublishedDate(response.headers.get("last-modified")),
+      })], context.config);
     }
     const length = Number(response.headers.get("content-length") || 0);
     if (length > 10_000_000) throw new Error("Web page is larger than the 10 MB parsing limit");

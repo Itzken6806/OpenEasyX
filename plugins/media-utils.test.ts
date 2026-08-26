@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractFeedMedia, extractHtmlMedia, filterMedia } from "./media-utils.js";
+import { extractFeedMedia, extractHtmlMedia, filterMedia, htmlPublishedDate, sourcePublishedDate } from "./media-utils.js";
 
 describe("media scraper utilities", () => {
   it("extracts direct, Open Graph, responsive image, and video media from HTML", () => {
@@ -27,6 +27,11 @@ describe("media scraper utilities", () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({ title: "New post", pageUrl: "https://example.test/posts/1", expectedBytes: 1234 });
     expect(items.every((item) => item.publishedAt?.includes("24 Aug 2026"))).toBe(true);
+  });
+
+  it("normalizes source dates from compact dates and embedded Unix timestamps", () => {
+    expect(sourcePublishedDate("20240203")).toBe("2024-02-03T00:00:00.000Z");
+    expect(htmlPublishedDate(String.raw`<script>{\"taken_at_timestamp\":1706955630}</script>`)).toBe("2024-02-03T10:20:30.000Z");
   });
 
   it("applies administrator media type filters and limits", () => {
