@@ -30,6 +30,7 @@ The MVP exposes a JSON API under `/api`. It is currently intended for private, a
 | `GET` | `/api/live-cams` | Aggregate live rooms from installed live-cam plugins |
 | `GET` | `/api/live-cams/events` | Stream progressive live-provider results with server-sent events |
 | `POST` | `/api/live-cams/stream` | Resolve one room to a short-lived proxied live stream |
+| `POST` | `/api/live-cams/record` | Queue a live room recording in the ordinary download pipeline |
 
 Password fields are returned as `••••••••`. Sending that sentinel back preserves the stored value.
 

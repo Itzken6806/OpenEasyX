@@ -84,6 +84,7 @@ export class Catalog {
   private scanPromise: Promise<{ indexed: number; durationMs: number }> | null = null;
   private thumbnails = new Map<string, Promise<string>>();
   private previews = new Map<string, Promise<string>>();
+  private playbackFiles = new Map<string, Promise<string>>();
   private ffmpegQueue: Promise<void> = Promise.resolve();
   readonly status = { running: false, indexed: 0, lastScanAt: "", error: "" };
 
@@ -96,6 +97,7 @@ export class Catalog {
     fs.mkdirSync(mediaRoot, { recursive: true });
     fs.mkdirSync(path.join(dataDir, "thumbnails"), { recursive: true, mode: 0o700 });
     fs.mkdirSync(path.join(dataDir, "video-previews"), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.join(dataDir, "playback-cache"), { recursive: true, mode: 0o700 });
   }
 
   scan() {
@@ -166,6 +168,7 @@ export class Catalog {
     const cached = [
       path.join(this.dataDir, "thumbnails", media.kind === "video" ? `${media.id}-middle-v1.jpg` : `${media.id}-image-v1.jpg`),
       path.join(this.dataDir, "video-previews", `${media.id}.gif`),
+      path.join(this.dataDir, "playback-cache", `${media.id}.mp4`),
     ];
     for (const file of cached) fs.rmSync(file, { force: true });
     fs.rmSync(path.join(this.dataDir, "subtitles", media.id), { recursive: true, force: true });
@@ -176,6 +179,30 @@ export class Catalog {
     const operation = this.ffmpegQueue.then(task, task);
     this.ffmpegQueue = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  playbackFile(media: Media): Promise<{ file: string; mimeType: string }> {
+    const source = this.absolutePath(media);
+    if (media.kind !== "video" || media.extension !== ".mp4") return Promise.resolve({ file: source, mimeType: media.mimeType });
+    let header: Buffer;
+    try { const descriptor = fs.openSync(source, "r"); try { header = Buffer.alloc(12); fs.readSync(descriptor, header, 0, header.length, 0); } finally { fs.closeSync(descriptor); } }
+    catch { return Promise.reject(new Error("Media file is not available")); }
+    if (header.subarray(4, 8).toString("ascii") === "ftyp") return Promise.resolve({ file: source, mimeType: media.mimeType });
+    const destination = path.join(this.dataDir, "playback-cache", `${media.id}.mp4`);
+    try {
+      if (fs.statSync(destination).mtimeMs >= fs.statSync(source).mtimeMs) return Promise.resolve({ file: destination, mimeType: "video/mp4" });
+    } catch { /* A missing or stale compatibility remux is regenerated below. */ }
+    const active = this.playbackFiles.get(media.id);
+    const operation = active ?? this.enqueueFfmpeg(async () => {
+      const temporary = `${destination}.tmp.mp4`;
+      try {
+        await runFfmpeg(["-i", source, "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", "-y", temporary], 120_000);
+        if (!fs.existsSync(temporary) || fs.statSync(temporary).size <= 0) throw new Error("FFmpeg produced an empty playback file");
+        fs.renameSync(temporary, destination); return destination;
+      } finally { try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch {} }
+    }).finally(() => this.playbackFiles.delete(media.id));
+    if (!active) this.playbackFiles.set(media.id, operation);
+    return operation.then((file) => ({ file, mimeType: "video/mp4" }));
   }
 
   thumbnail(media: Media) {

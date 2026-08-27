@@ -14,9 +14,10 @@ async function fixture() {
   const pluginRoot = path.join(root, "plugins"); fs.mkdirSync(path.join(pluginRoot, "viewer"), { recursive: true }); fs.mkdirSync(path.join(pluginRoot, "live"), { recursive: true });
   fs.writeFileSync(path.join(pluginRoot, "viewer", "index.mjs"), `export default { manifest: { id: "org.easyx.viewer", name: "Viewer", version: "1", description: "Test", author: "Test", capabilities: ["library-hook"] }, acceptLibraryDeletion: async (_context, deletion) => deletion };`);
   fs.writeFileSync(path.join(pluginRoot, "live", "index.mjs"), `export default {
-    manifest: { id: "test.live", name: "Test Live", version: "1", description: "Test", author: "Test", capabilities: ["live-cam"], sourceUrlPatterns: ["https://live.test/*"] },
+    manifest: { id: "test.live", name: "Test Live", version: "1", description: "Test", author: "Test", capabilities: ["live-cam", "download-resolver"], sourceUrlPatterns: ["https://live.test/*"] },
     listLiveCams: async (_context, query) => ({ cams: [{ id: "alice", username: "alice", title: "Alice live", pageUrl: "https://live.test/alice", viewers: 25 }], total: 1, page: query.page, pageSize: query.pageSize, pages: 1 }),
-    resolveLiveStream: async () => ({ url: "https://cdn.test/alice/master.m3u8", headers: { Referer: "https://live.test/" } })
+    resolveLiveStream: async () => ({ url: "https://cdn.test/alice/master.m3u8", headers: { Referer: "https://live.test/" } }),
+    resolveDownload: async (_context, item) => ({ url: "https://cdn.test/alice/master.m3u8", filename: item.filename })
   };`);
   const database = new Database(path.join(root, "data")); const plugins = new PluginManager(database, [pluginRoot]); await plugins.load();
   return { database, plugins, service: new LiveCamService(database, plugins) };
@@ -57,6 +58,22 @@ describe("Open EasyX live cams", () => {
       total: 7, providers: [{ id: "test.live", count: 7 }],
     });
     await expect(service.get("test.live", "cam-125")).resolves.toMatchObject({ id: "cam-125", providerId: "test.live" });
+  });
+
+  it("reuses the fresh catalogue entry when opening a room and queues direct recordings", async () => {
+    const { database, plugins, service } = await fixture(); plugins.install("test.live");
+    const plugin = plugins.get("test.live"); let searched = false;
+    plugin.listLiveCams = async (_context, query) => {
+      if (query.search) { searched = true; throw new Error("The provider search endpoint rejected the request"); }
+      return { cams: [{ id: "alice", username: "alice", pageUrl: "https://live.test/alice", thumbnailUrl: "https://live.test/alice.jpg" }], total: 1, page: query.page, pageSize: query.pageSize, pages: 1 };
+    };
+    await service.list({ page: 1, pageSize: 24 });
+    const cam = await service.get("test.live", "alice");
+    expect(searched).toBe(false);
+    expect(cam).toMatchObject({ username: "alice", providerId: "test.live" });
+    const recording = service.record("test.live", cam);
+    expect(recording.status).toBe("queued");
+    expect(database.getItem(recording.itemId)).toMatchObject({ status: "queued", mediaType: "video", pageUrl: "https://live.test/alice", filename: expect.stringMatching(/^alice-.*\.mp4$/) });
   });
 
   it("streams an initial snapshot and then updates as each provider completes", async () => {

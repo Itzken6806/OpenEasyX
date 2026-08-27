@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   bongacamsLiveCams, cam4LiveCams, camsLiveCams, camsodaLiveCams, listDiscoveredLiveCams,
-  livejasminLiveCams, myfreecamsExplorerLiveCams, myfreecamsLiveCams, stripchatLiveCams, twitchLiveCams, xcamsLiveCams,
+  livejasminLiveCams, myfreecamsExplorerLiveCams, myfreecamsLiveCams, stripchatLiveCams, stripchatProfileLiveCams, twitchLiveCams, xcamsLiveCams,
 } from "./live-cam-discovery.js";
 
 const bongaFixture = `<script id="listingConfiguration" type="application/json">${JSON.stringify({ stateData: { models: [
@@ -54,6 +54,14 @@ describe("public live-cam discovery parsers", () => {
   it("normalizes Stripchat API models", () => {
     const payload = { blocks: [{ models: [{ username: "Alice", id: 42, snapshotTimestamp: 123, status: "public", viewersCount: 55, broadcastGender: "female" }] }] };
     expect(stripchatLiveCams(payload)).toEqual([expect.objectContaining({ username: "Alice", viewers: 55, gender: "female" })]);
+  });
+
+  it("reads an exact live Stripchat room from its browser-compatible profile state", () => {
+    const state = { viewCam: { model: { username: "Alice", id: 42, status: "public", isLive: true, isOnline: true, viewersCount: 55 } } };
+    const html = `<html><script>window.__PRELOADED_STATE__ = ${JSON.stringify(state)};</script></html>`;
+    expect(stripchatProfileLiveCams(html, "alice")).toEqual([expect.objectContaining({ id: "alice", username: "Alice", pageUrl: "https://stripchat.com/Alice" })]);
+    expect(stripchatProfileLiveCams(html, "bob")).toEqual([]);
+    expect(stripchatProfileLiveCams(`<script>window.__PRELOADED_STATE__ = ${JSON.stringify({ viewCam: { model: { username: "Alice", isLive: false, isOnline: false } } })}</script>`)).toEqual([]);
   });
 });
 

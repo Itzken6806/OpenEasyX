@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type HlsInstance from "hls.js";
-import { AlertTriangle, ArrowLeft, Eye, LoaderCircle, Maximize, Minimize, Pause, Play, Radio, RefreshCw, Search, Server, Users, Volume2, VolumeX } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Download, Eye, LoaderCircle, Maximize, Minimize, Pause, Play, Radio, RefreshCw, Search, Server, Users, Volume2, VolumeX } from "lucide-react";
 import { api } from "./api";
 import { monitorVideoStalls } from "./video-stall-recovery";
 import "./player.css";
@@ -129,6 +129,17 @@ export function LivePlayer({ cam, close }: { cam: LiveCam; close: () => void }) 
   </div>;
 }
 
+export function LiveCamRecordButton({ cam }: { cam: LiveCam }) {
+  const [recording, setRecording] = useState<"idle" | "queueing" | "queued">("idle"); const [recordError, setRecordError] = useState("");
+  const record = async () => {
+    if (recording !== "idle") return;
+    setRecording("queueing"); setRecordError("");
+    try { await api("/api/live-cams/record", { method: "POST", body: JSON.stringify({ providerId: cam.providerId, cam }) }); setRecording("queued"); }
+    catch (reason) { setRecording("idle"); setRecordError(reason instanceof Error ? reason.message : String(reason)); }
+  };
+  return <><button className="quiet" onClick={() => void record()} disabled={recording !== "idle"}><Download/>{recording === "queueing" ? "Queuing…" : recording === "queued" ? "Recording queued" : "Record live"}</button>{recordError && <p className="row-error">{recordError}</p>}</>;
+}
+
 export function LiveCamViewer({ providerId, camId, close }: { providerId: string; camId: string; close: () => void }) {
   const [cam, setCam] = useState<LiveCam | null>(null); const [error, setError] = useState("");
   useEffect(() => {
@@ -143,7 +154,7 @@ export function LiveCamViewer({ providerId, camId, close }: { providerId: string
   return <article className="watch-page live-watch-page">
     <section className="theater-stage"><LivePlayer cam={cam} close={close}/></section>
     <section className="watch-info">
-      <div className="watch-heading"><div><span className="watch-eyebrow">LIVE · {cam.providerName}</span><h1>{cam.username}</h1><p>{cam.title && cam.title !== cam.username ? cam.title : "Public live broadcast"}</p></div><div className="watch-actions"><button className="quiet" onClick={close}><ArrowLeft/>Back to Live Cam</button></div></div>
+      <div className="watch-heading"><div><span className="watch-eyebrow">LIVE · {cam.providerName}</span><h1>{cam.username}</h1><p>{cam.title && cam.title !== cam.username ? cam.title : "Public live broadcast"}</p></div><div className="watch-actions"><LiveCamRecordButton cam={cam}/><button className="quiet" onClick={close}><ArrowLeft/>Back to Live Cam</button></div></div>
       <div className="watch-meta"><span className="live-meta-on-air"><Radio/>ON AIR</span><span><Eye/>{Number(cam.viewers ?? 0).toLocaleString()} viewers</span><span><Radio/>{cam.providerName}</span>{cam.age ? <span>{cam.age} years old</span> : null}</div>
       {cam.tags?.length ? <div className="live-watch-tags">{cam.tags.slice(0, 12).map((tag) => <span key={tag}>#{tag}</span>)}</div> : null}
     </section>

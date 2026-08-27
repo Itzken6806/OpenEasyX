@@ -201,6 +201,19 @@ export function stripchatLiveCams(payload: unknown): LiveCam[] {
   }).filter((cam): cam is LiveCam => Boolean(cam)));
 }
 
+export function stripchatProfileLiveCams(html: string, requestedUsername?: string): LiveCam[] {
+  const marker = html.indexOf("window.__PRELOADED_STATE__");
+  const raw = marker >= 0 ? balancedObject(html, marker) : undefined;
+  if (!raw) return [];
+  let state: Record<string, unknown> | undefined;
+  try { state = record(JSON.parse(raw)); } catch { return []; }
+  const model = record(record(state?.viewCam)?.model);
+  if (!model || (model.isLive !== true && model.isOnline !== true)) return [];
+  const cams = stripchatLiveCams({ models: [model] });
+  const needle = requestedUsername?.trim().toLowerCase();
+  return needle ? cams.filter((cam) => cam.username.toLowerCase() === needle) : cams;
+}
+
 async function stripchatPage(context: PluginContext, query: LiveCamQuery): Promise<LiveCamPage> {
   const primaryTag = { female: "girls", male: "men", couple: "couples", trans: "trans" }[query.gender ?? "female"];
   const load = async (offset: number, limit: number) => {
@@ -210,8 +223,9 @@ async function stripchatPage(context: PluginContext, query: LiveCamQuery): Promi
     return { cams: stripchatLiveCams(payload), total: whole(record(payload)?.totalCount) };
   };
   if (query.search) {
-    const response = await context.fetch(`https://stripchat.com/api/front/v2/models/username/${encodeURIComponent(query.search)}/cam`, { headers: { accept: "application/json", referer: "https://stripchat.com/", "user-agent": USER_AGENT }, signal: context.signal ?? AbortSignal.timeout(20_000) });
-    if (!response.ok) return filteredPage([], query); return filteredPage(stripchatLiveCams(await response.json()), { ...query, page: 1 });
+    const username = query.search.trim();
+    const html = await browserHtml(context, `https://stripchat.com/${encodeURIComponent(username)}`);
+    return filteredPage(stripchatProfileLiveCams(html, username), { ...query, page: 1 });
   }
   const start = (query.page - 1) * query.pageSize; const parts = await Promise.all(Array.from({ length: Math.ceil(query.pageSize / 50) }, (_, index) => load(start + index * 50, Math.min(50, query.pageSize - index * 50))));
   const cams = parts.flatMap((part) => part.cams).slice(0, query.pageSize); const total = parts[0]?.total ?? cams.length;

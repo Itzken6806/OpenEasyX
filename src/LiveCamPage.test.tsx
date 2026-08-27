@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { LiveCamUnavailable, LivePlayer, liveCamListUrl, liveCamPresetFromSearch, liveCamUrl } from "./LiveCamPage";
+import { LiveCamRecordButton, LiveCamUnavailable, LivePlayer, liveCamListUrl, liveCamPresetFromSearch, liveCamUrl } from "./LiveCamPage";
 
 describe("Live Cam availability", () => {
   it("explains that a live source plugin is needed instead of presenting a broken empty grid", () => {
@@ -24,5 +24,10 @@ describe("Live Cam availability", () => {
     expect(liveCamPresetFromSearch("?q=alice&source=test.live&gender=female&page=3"))
       .toEqual({ query: "alice", providerId: "test.live", gender: "female", page: 3 });
     expect(liveCamUrl({ providerId: "test.live", id: "alice/bob" })).toBe("/live-cam/test.live/alice%2Fbob");
+  });
+
+  it("offers direct recording from a live room", () => {
+    const html = renderToStaticMarkup(<LiveCamRecordButton cam={{ id: "alice", username: "alice", pageUrl: "https://live.test/alice", providerId: "test.live", providerName: "Test Live" }}/>);
+    expect(html).toContain("Record live");
   });
 });

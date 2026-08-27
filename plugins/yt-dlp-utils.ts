@@ -138,7 +138,7 @@ export function ytDlpDownload(item: MediaCandidate, config: Record<string, unkno
   if (options.impersonate) args.push("--impersonate", options.impersonate);
   if (options.referer) args.push("--referer", options.referer);
   args.push("--format", format, "--merge-output-format", "mp4", "--remux-video", "mp4", "--output", "{output}");
-  if (options.live) args.push("--hls-use-mpegts");
+  if (options.live) args.push("--no-hls-use-mpegts");
   args.push(extractorUrl);
   return { kind: "command", command: "yt-dlp", args, filename: item.filename ?? `${item.externalId}.mp4` };
 }

@@ -24,6 +24,7 @@ function usernameFromUrl(value: string): string {
 export class LiveCamService {
   private proxyEntries = new Map<string, ProxyEntry>();
   private proxyReverse = new Map<string, string>();
+  private recentCams = new Map<string, { cam: PublicLiveCam; expiresAt: number }>();
 
   constructor(private readonly db: Database, private readonly plugins: PluginManager, private readonly request: typeof fetch = fetch) {}
 
@@ -69,6 +70,7 @@ export class LiveCamService {
       }
       const normalized = cams.filter((cam) => pluginMatchesSource(entry.manifest, cam.pageUrl))
         .map((cam) => ({ ...cam, providerId: entry.manifest.id, providerName: entry.manifest.name }));
+      for (const cam of normalized) this.recentCams.set(`${entry.manifest.id}:${cam.id.toLowerCase()}`, { cam, expiresAt: Date.now() + 120_000 });
       return {
         items: normalized,
         total,
@@ -134,12 +136,41 @@ export class LiveCamService {
   async get(providerId: string, camId: string): Promise<PublicLiveCam> {
     const entry = this.livePlugins(providerId)[0];
     if (!entry) throw Object.assign(new Error("The selected live-cam plugin is not installed"), { statusCode: 404 });
+    const cached = this.recentCams.get(`${providerId}:${camId.toLowerCase()}`);
+    if (cached && cached.expiresAt > Date.now()) return cached.cam;
     const result = await this.listProvider(entry, { page: 1, pageSize: 48, search: camId });
     if (!result.status.ok) throw Object.assign(new Error(result.status.error ?? "The live provider could not be reached"), { statusCode: 502 });
     const needle = camId.toLowerCase();
     const cam = result.items.find((item) => item.id.toLowerCase() === needle || item.username.toLowerCase() === needle);
     if (!cam) throw Object.assign(new Error("This cam is no longer live"), { statusCode: 404 });
     return cam;
+  }
+
+  record(providerId: string, cam: LiveCam): { itemId: string; status: string } {
+    const entry = this.livePlugins(providerId)[0];
+    if (!entry) throw Object.assign(new Error("The selected live-cam plugin is not installed"), { statusCode: 404 });
+    const plugin = this.plugins.get(providerId);
+    if (!entry.manifest.capabilities.includes("download-resolver") || !plugin.resolveDownload) {
+      throw Object.assign(new Error(`${entry.manifest.name} cannot record live streams`), { statusCode: 409 });
+    }
+    if (!pluginMatchesSource(entry.manifest, cam.pageUrl)) throw Object.assign(new Error(`${entry.manifest.name} does not support this live URL`), { statusCode: 400 });
+    const username = cam.username.trim();
+    const startedAt = new Date();
+    const session = startedAt.toISOString().replace(/[:.]/g, "-");
+    const externalId = `manual-live:${username.toLowerCase()}:${session}`;
+    const safeName = username.replace(/[^a-z0-9_.-]+/gi, "-").replace(/^-+|-+$/g, "") || "live";
+    const performer = this.db.upsertPerformer({ externalId: `live:${username.toLowerCase()}`, name: username, imageUrl: cam.thumbnailUrl }, providerId);
+    const source = this.db.addSource(performer.id, providerId, {
+      externalId: `live:${username.toLowerCase()}`, label: `${username} live`, profileUrl: cam.pageUrl, domain: new URL(cam.pageUrl).hostname.replace(/^www\./i, ""),
+    });
+    this.db.ingestItems(source, [{
+      externalId, title: cam.title ?? `${username} live`, pageUrl: cam.pageUrl, mediaType: "video",
+      publishedAt: startedAt.toISOString(), filename: `${safeName}-${session}.mp4`, metadata: { extractorUrl: cam.pageUrl, live: true },
+    }]);
+    const item = this.db.getItemBySourceExternalId(source.id, externalId);
+    if (!item) throw new Error("The live recording could not be added to the download queue");
+    const queued = this.db.setItemStatus(item.id, "queued", { progress: 0 });
+    return { itemId: item.id, status: queued?.status ?? "queued" };
   }
 
   async resolve(providerId: string, cam: LiveCam): Promise<{ streamUrl: string }> {

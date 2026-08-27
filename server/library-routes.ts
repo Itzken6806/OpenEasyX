@@ -145,12 +145,12 @@ export function registerLibraryRoutes(app: FastifyInstance<any, any, any, any>, 
     catch (error) { app.log.warn(error, "Animated preview could not be generated"); return reply.status(422).send({ error: "Animated preview is not available" }); }
   });
 
-  const sendMedia = (request: FastifyRequest, reply: FastifyReply, id: string) => {
-    const media = requiredMedia(id); const file = catalog.absolutePath(media); let stat: fs.Stats;
+  const sendMedia = async (request: FastifyRequest, reply: FastifyReply, id: string) => {
+    const media = requiredMedia(id); const playback = await catalog.playbackFile(media); const file = playback.file; let stat: fs.Stats;
     try { stat = fs.statSync(file); } catch { throw Object.assign(new Error("Media file is not available"), { statusCode: 404 }); }
     if (!stat.isFile() || stat.size <= 0) { libraryDb.markMediaUnplayable(media.id); throw Object.assign(new Error("Media file is not playable"), { statusCode: 404 }); }
     const range = request.headers.range;
-    reply.header("accept-ranges", "bytes").header("content-type", media.mimeType).header("cache-control", "private, max-age=3600");
+    reply.header("accept-ranges", "bytes").header("content-type", playback.mimeType).header("cache-control", "private, max-age=3600");
     if (!range) return reply.header("content-length", stat.size).send(fs.createReadStream(file));
     const parsed = parseMediaRange(range, stat.size);
     if (!parsed) return reply.status(416).header("content-range", `bytes */${stat.size}`).send();

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { Catalog } from "./catalog.js";
 import { LibraryDatabase } from "./library-database.js";
@@ -99,6 +100,23 @@ describe("media catalog", () => {
     fs.appendFileSync(file, "-complete");
     await catalog.scan();
     expect(db.listMedia().items[0]).toMatchObject({ id: item.id, size: 16 });
+    db.close();
+  });
+
+  it("lazily remuxes legacy MPEG-TS recordings mislabeled as MP4 for browser playback", async () => {
+    const { data, media, db } = fixture();
+    const file = path.join(media, "Example Performer", "example.com", "legacy-live.mp4");
+    const generated = spawnSync("ffmpeg", [
+      "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10:duration=1",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mpegts", file,
+    ], { encoding: "utf8" });
+    expect(generated.status, generated.stderr).toBe(0);
+    expect(fs.readFileSync(file).subarray(0, 1).toString("hex")).toBe("47");
+    const catalog = new Catalog(db, media, data, false); await catalog.scan();
+    const playback = await catalog.playbackFile(db.listMedia().items[0]);
+    expect(playback).toMatchObject({ mimeType: "video/mp4", file: expect.stringContaining("playback-cache") });
+    expect(fs.readFileSync(playback.file).subarray(4, 8).toString("ascii")).toBe("ftyp");
+    expect(fs.readFileSync(file).subarray(0, 1).toString("hex")).toBe("47");
     db.close();
   });
 

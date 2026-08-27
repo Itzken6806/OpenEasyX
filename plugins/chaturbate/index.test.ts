@@ -24,7 +24,7 @@ describe("Chaturbate plugin", () => {
     expect(normalizedChaturbateUrl("https://chaturbate.com/CherryCrush/")).toBe("https://chaturbate.com/cherrycrush/");
     const request = ytDlpDownload({ externalId: "live", pageUrl: "https://chaturbate.com/cherrycrush/", mediaType: "video" }, {}, { live: true });
     expect(request.args[request.args.indexOf("--format") + 1]).toBe("bestvideo+bestaudio/best");
-    expect(request.args).toContain("--hls-use-mpegts");
+    expect(request.args).toContain("--no-hls-use-mpegts");
   });
 
   it("normalizes public room-list entries for the Viewer live aggregation", () => {

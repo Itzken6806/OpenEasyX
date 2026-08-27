@@ -174,6 +174,14 @@ const liveCamQuerySchema = z.object({
   providerId: z.preprocess((value) => value === "" ? undefined : value, z.string().trim().min(1).optional()), search: z.string().trim().max(120).optional(),
   gender: z.preprocess((value) => value === "" ? undefined : value, z.enum(["female", "male", "couple", "trans"]).optional()),
 });
+const liveCamBodySchema = z.object({
+  providerId: z.string().trim().min(1),
+  cam: z.object({
+    id: z.string().trim().min(1).max(300), username: z.string().trim().min(1).max(160), title: z.string().max(300).optional(),
+    pageUrl: z.string().url().max(4096), thumbnailUrl: z.string().url().max(4096).optional(), viewers: z.number().int().min(0).optional(),
+    age: z.number().int().min(18).max(120).optional(), gender: z.string().max(40).optional(), tags: z.array(z.string().max(80)).max(50).optional(),
+  }),
+});
 
 app.get<{ Querystring: Record<string, unknown> }>("/api/live-cams", async (request) => {
   const query = liveCamQuerySchema.parse(request.query);
@@ -205,15 +213,12 @@ app.get<{ Params: { providerId: string; camId: string } }>("/api/live-cams/:prov
   return liveCams.get(params.providerId, params.camId);
 });
 app.post<{ Body: unknown }>("/api/live-cams/stream", async (request) => {
-  const body = z.object({
-    providerId: z.string().trim().min(1),
-    cam: z.object({
-      id: z.string().trim().min(1).max(300), username: z.string().trim().min(1).max(160), title: z.string().max(300).optional(),
-      pageUrl: z.string().url().max(4096), thumbnailUrl: z.string().url().max(4096).optional(), viewers: z.number().int().min(0).optional(),
-      age: z.number().int().min(18).max(120).optional(), gender: z.string().max(40).optional(), tags: z.array(z.string().max(80)).max(50).optional(),
-    }),
-  }).parse(request.body);
+  const body = liveCamBodySchema.parse(request.body);
   return liveCams.resolve(body.providerId, body.cam);
+});
+app.post<{ Body: unknown }>("/api/live-cams/record", async (request) => {
+  const body = liveCamBodySchema.parse(request.body);
+  return liveCams.record(body.providerId, body.cam);
 });
 app.get<{ Params: { tokenPath: string }; Querystring: Record<string, unknown> }>("/api/live-cams/proxy/:tokenPath", async (request, reply) => {
   return liveCams.proxy(request.params.tokenPath, reply, request.query, typeof request.headers.range === "string" ? request.headers.range : undefined);

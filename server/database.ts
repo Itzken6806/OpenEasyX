@@ -357,6 +357,11 @@ export class Database {
     return row ? this.mapItem(row) : undefined;
   }
 
+  getItemBySourceExternalId(sourceId: string, externalId: string): DownloadItem | undefined {
+    const row = this.sqlite.prepare("SELECT * FROM items WHERE source_id=? AND external_id=?").get(sourceId, externalId) as any;
+    return row ? this.mapItem(row) : undefined;
+  }
+
   markStoredItemDeleted(relativePath: string): DownloadItem | undefined {
     const normalized = relativePath.replaceAll("\\", "/").replace(/^\.\//, "");
     const row = this.sqlite.prepare("SELECT id FROM items WHERE replace(storage_path,'\\','/')=? AND status='completed' ORDER BY updated_at DESC LIMIT 1").get(normalized) as { id: string } | undefined;
