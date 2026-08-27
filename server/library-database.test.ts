@@ -8,6 +8,7 @@ import { Catalog } from "./catalog.js";
 import { LibraryDatabase } from "./library-database.js";
 
 const roots: string[] = [];
+const ffmpegAvailable = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "easyx-viewer-")); roots.push(root);
@@ -103,7 +104,7 @@ describe("media catalog", () => {
     db.close();
   });
 
-  it("lazily remuxes legacy MPEG-TS recordings mislabeled as MP4 for browser playback", async () => {
+  it.skipIf(!ffmpegAvailable)("lazily remuxes legacy MPEG-TS recordings mislabeled as MP4 for browser playback", async () => {
     const { data, media, db } = fixture();
     const file = path.join(media, "Example Performer", "example.com", "legacy-live.mp4");
     const generated = spawnSync("ffmpeg", [
