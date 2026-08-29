@@ -320,8 +320,8 @@ export class Database {
     const clauses: string[] = [];
     const parameters: Array<string | number> = [];
     const categoryStatuses: Record<ItemCategory, string[]> = {
-      active: ["queued", "downloading"], ready: ["available"], downloaded: ["completed"],
-      errors: ["failed"], other: ["duplicate", "superseded", "deleted"],
+      active: ["queued", "downloading", "paused", "stopping", "cancelling"], ready: ["available"], downloaded: ["completed"],
+      errors: ["failed"], other: ["cancelled", "duplicate", "superseded", "deleted"],
     };
     if (options.category) {
       const statuses = categoryStatuses[options.category];
@@ -335,8 +335,8 @@ export class Database {
     if (options.performerId) { clauses.push("i.performer_id=?"); parameters.push(options.performerId); }
     const search = options.search?.trim().toLowerCase();
     if (search) {
-      clauses.push("(lower(COALESCE(i.title,'')) LIKE ? OR lower(i.external_id) LIKE ? OR lower(p.name) LIKE ? OR lower(s.label) LIKE ? OR lower(s.domain) LIKE ?)");
-      parameters.push(...Array(5).fill(`%${search}%`));
+      clauses.push("(lower(i.id) LIKE ? OR lower(COALESCE(i.title,'')) LIKE ? OR lower(i.external_id) LIKE ? OR lower(p.name) LIKE ? OR lower(s.label) LIKE ? OR lower(s.domain) LIKE ?)");
+      parameters.push(...Array(6).fill(`%${search}%`));
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const joins = "FROM items i JOIN performers p ON p.id=i.performer_id JOIN sources s ON s.id=i.source_id";
@@ -376,8 +376,10 @@ export class Database {
   }
 
   requeueInterruptedDownloads() {
-    const result = this.sqlite.prepare("UPDATE items SET status='queued',progress=0,downloaded_bytes=0,error=NULL,download_started_at=NULL,download_finished_at=NULL,updated_at=? WHERE status='downloading'").run(now());
-    return Number(result.changes);
+    const stamp = now();
+    const queued = this.sqlite.prepare("UPDATE items SET status='queued',progress=0,downloaded_bytes=0,error=NULL,download_started_at=NULL,download_finished_at=NULL,updated_at=? WHERE status='downloading'").run(stamp);
+    const cancelled = this.sqlite.prepare("UPDATE items SET status='cancelled',error=NULL,download_finished_at=?,updated_at=? WHERE status IN ('stopping','cancelling')").run(stamp, stamp);
+    return Number(queued.changes) + Number(cancelled.changes);
   }
 
   retryFailedItems() {
@@ -388,8 +390,8 @@ export class Database {
   setItemStatus(itemId: string, status: string, values: { progress?: number; downloadedBytes?: number; error?: string | null; checksum?: string; storagePath?: string; duplicateOf?: string } = {}) {
     const stamp = now();
     this.sqlite.prepare(`UPDATE items SET status=?,progress=COALESCE(?,progress),downloaded_bytes=CASE WHEN ?='queued' THEN 0 ELSE COALESCE(?,downloaded_bytes) END,error=?,checksum_sha256=COALESCE(?,checksum_sha256),storage_path=COALESCE(?,storage_path),duplicate_of=COALESCE(?,duplicate_of),
-      download_started_at=CASE WHEN ?='queued' THEN NULL WHEN ?='downloading' AND status<>'downloading' THEN ? ELSE download_started_at END,
-      download_finished_at=CASE WHEN ? IN ('queued','downloading') THEN NULL WHEN ? IN ('completed','duplicate','failed') THEN ? ELSE download_finished_at END,
+      download_started_at=CASE WHEN ?='queued' THEN NULL WHEN ?='downloading' AND download_started_at IS NULL THEN ? ELSE download_started_at END,
+      download_finished_at=CASE WHEN ? IN ('queued','downloading','paused','stopping','cancelling') THEN NULL WHEN ? IN ('completed','duplicate','failed','cancelled','deleted') THEN ? ELSE download_finished_at END,
       updated_at=? WHERE id=?`)
       .run(status, values.progress ?? null, status, values.downloadedBytes ?? null, values.error ?? null, values.checksum ?? null, values.storagePath ?? null, values.duplicateOf ?? null,
         status, status, stamp, status, status, stamp, stamp, itemId);
@@ -430,10 +432,14 @@ export class Database {
     this.sqlite.prepare("UPDATE items SET status='superseded',duplicate_of=?,storage_path=NULL,updated_at=? WHERE id=?").run(betterItemId, now(), itemId);
   }
 
+  deleteItem(itemId: string) {
+    return Number(this.sqlite.prepare("DELETE FROM items WHERE id=?").run(itemId).changes) > 0;
+  }
+
   stats() {
     const scalar = (sql: string) => Number((this.sqlite.prepare(sql).get() as any).value);
     return { performers: scalar("SELECT count(*) value FROM performers"), sources: scalar("SELECT count(*) value FROM sources"),
-      available: scalar("SELECT count(*) value FROM items WHERE status='available'"), queued: scalar("SELECT count(*) value FROM items WHERE status IN ('queued','downloading')"),
+      available: scalar("SELECT count(*) value FROM items WHERE status='available'"), queued: scalar("SELECT count(*) value FROM items WHERE status IN ('queued','downloading','paused','stopping','cancelling')"),
       completed: scalar("SELECT count(*) value FROM items WHERE status='completed'"), bytes: scalar("SELECT COALESCE(sum(expected_bytes),0) value FROM items WHERE status='completed'") };
   }
 

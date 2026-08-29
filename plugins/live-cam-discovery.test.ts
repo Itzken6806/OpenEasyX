@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   bongacamsLiveCams, cam4LiveCams, camsLiveCams, camsodaLiveCams, listDiscoveredLiveCams,
-  livejasminLiveCams, myfreecamsExplorerLiveCams, myfreecamsLiveCams, stripchatLiveCams, stripchatProfileLiveCams, twitchLiveCams, xcamsLiveCams,
+  livejasminLiveCams, myfreecamsExplorerLiveCams, myfreecamsLiveCams, stripchatLiveCams, stripchatProfileLiveCams, stripchatStreamConfig, twitchLiveCams, xcamsLiveCams,
 } from "./live-cam-discovery.js";
 
 const bongaFixture = `<script id="listingConfiguration" type="application/json">${JSON.stringify({ stateData: { models: [
@@ -57,9 +57,13 @@ describe("public live-cam discovery parsers", () => {
   });
 
   it("reads an exact live Stripchat room from its browser-compatible profile state", () => {
-    const state = { viewCam: { model: { username: "Alice", id: 42, status: "public", isLive: true, isOnline: true, viewersCount: 55 } } };
+    const state = {
+      viewCam: { model: { username: "Alice", id: 42, status: "public", isLive: true, isOnline: true, viewersCount: 55 } },
+      configV3: { initialCommon: { hlsStreamHost: "doppiocdn.net", hlsStreamHosts: { A: "doppiocdn.com" } }, static: { featureSettings: { hlsFallback: { fallbackDomains: ["doppiocdn.media"] } } } },
+    };
     const html = `<html><script>window.__PRELOADED_STATE__ = ${JSON.stringify(state)};</script></html>`;
     expect(stripchatProfileLiveCams(html, "alice")).toEqual([expect.objectContaining({ id: "alice", username: "Alice", pageUrl: "https://stripchat.com/Alice" })]);
+    expect(stripchatStreamConfig(html)).toEqual({ modelId: "42", domains: ["doppiocdn.media", "doppiocdn.net", "doppiocdn.com"] });
     expect(stripchatProfileLiveCams(html, "bob")).toEqual([]);
     expect(stripchatProfileLiveCams(`<script>window.__PRELOADED_STATE__ = ${JSON.stringify({ viewCam: { model: { username: "Alice", isLive: false, isOnline: false } } })}</script>`)).toEqual([]);
   });

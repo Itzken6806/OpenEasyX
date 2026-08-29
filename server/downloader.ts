@@ -3,14 +3,16 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { Database, DownloadItem } from "./database.js";
 import type { PluginManager } from "./plugin-manager.js";
 import type { LogWriter } from "./log-store.js";
 import { filenameFromUrl, safeSegment } from "./utils.js";
 
+type ActiveDownload = { child?: ChildProcess; abort?: AbortController; paused: boolean; action?: "stop" | "cancel" | "delete" };
+
 export class DownloadQueue {
-  private active = new Set<string>();
+  private active = new Map<string, ActiveDownload>();
   private finalizers = new Map<string, Promise<void>>();
   private timer?: NodeJS.Timeout;
   constructor(private db: Database, private plugins: PluginManager, private mediaRoot: string, private writeLog?: LogWriter, private onCompleted?: () => unknown | Promise<unknown>) {}
@@ -24,21 +26,76 @@ export class DownloadQueue {
     void this.tick();
   }
 
-  stop() { if (this.timer) clearInterval(this.timer); }
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    for (const control of this.active.values()) { this.signal(control, "SIGTERM"); control.abort?.abort(); }
+  }
+
+  pause(itemId: string) {
+    const item = this.requiredItem(itemId);
+    if (item.status === "queued") return this.db.setItemStatus(itemId, "paused");
+    const control = this.active.get(itemId);
+    if (item.status !== "downloading" || !control) throw Object.assign(new Error(`Cannot pause an item with status '${item.status}'`), { statusCode: 409 });
+    control.paused = true; this.signal(control, "SIGSTOP");
+    return this.db.setItemStatus(itemId, "paused");
+  }
+
+  resume(itemId: string) {
+    const item = this.requiredItem(itemId);
+    if (item.status !== "paused") throw Object.assign(new Error(`Cannot resume an item with status '${item.status}'`), { statusCode: 409 });
+    const control = this.active.get(itemId);
+    if (!control) return this.db.setItemStatus(itemId, "queued");
+    control.paused = false; this.signal(control, "SIGCONT");
+    return this.db.setItemStatus(itemId, "downloading");
+  }
+
+  stopRecording(itemId: string) { return this.interrupt(itemId, "stop"); }
+  cancel(itemId: string) { return this.interrupt(itemId, "cancel"); }
+  delete(itemId: string) {
+    const item = this.requiredItem(itemId);
+    if (["downloading", "paused"].includes(item.status) && this.active.has(itemId)) return this.interrupt(itemId, "delete");
+    this.db.deleteItem(itemId);
+    return { deleted: true, id: itemId };
+  }
+
+  outputPath(itemId: string) {
+    const item = this.requiredItem(itemId); if (item.storagePath) return item.storagePath;
+    const performer = this.db.getPerformer(item.performerId); const source = this.db.getSource(item.sourceId);
+    const fallback = `${item.externalId}.${item.mediaType === "image" ? "jpg" : item.mediaType === "video" ? "mp4" : "bin"}`;
+    return [safeSegment(performer?.name ?? "Unknown"), safeSegment(source?.domain ?? "unknown"), safeSegment(item.filename ?? fallback, fallback)].join("/");
+  }
+
+  private requiredItem(itemId: string) {
+    const item = this.db.getItem(itemId);
+    if (!item) throw Object.assign(new Error("Item not found"), { statusCode: 404 });
+    return item;
+  }
+
+  private interrupt(itemId: string, action: ActiveDownload["action"]) {
+    const item = this.requiredItem(itemId); const control = this.active.get(itemId);
+    if (!control) {
+      if (!["queued", "paused"].includes(item.status)) throw Object.assign(new Error(`Cannot ${action} an item with status '${item.status}'`), { statusCode: 409 });
+      return this.db.setItemStatus(itemId, action === "delete" ? "deleted" : "cancelled");
+    }
+    control.action = action; control.paused = false;
+    this.signal(control, "SIGCONT"); this.signal(control, action === "stop" ? "SIGINT" : "SIGTERM"); control.abort?.abort();
+    return this.db.setItemStatus(itemId, action === "stop" ? "stopping" : "cancelling");
+  }
 
   private async tick() {
     const max = Math.max(1, Math.min(8, Number(this.db.getSettings().maxConcurrentDownloads ?? 2)));
     while (this.active.size < max) {
       const item = this.db.nextQueued();
       if (!item || this.active.has(item.id)) return;
-      this.active.add(item.id);
+      const control: ActiveDownload = { paused: false };
+      this.active.set(item.id, control);
       this.db.setItemStatus(item.id, "downloading", { progress: 0 });
       this.writeLog?.("info", "download", "Download started", { itemId: item.id, pluginId: item.pluginId, title: item.title, mediaType: item.mediaType });
-      void this.download(item).finally(() => this.active.delete(item.id));
+      void this.download(item, control).finally(() => this.active.delete(item.id));
     }
   }
 
-  private async download(item: DownloadItem) {
+  private async download(item: DownloadItem, control: ActiveDownload) {
     let temporary = "";
     let temporaryDirectory = "";
     let lastProgress = 0; let lastBytes = 0; let lastProgressUpdate = 0;
@@ -48,7 +105,7 @@ export class DownloadQueue {
       const stamp = Date.now();
       if (!force && stamp - lastProgressUpdate < 250 && nextProgress - lastProgress < 0.005 && nextBytes - lastBytes < 256 * 1024) return;
       lastProgress = nextProgress; lastBytes = nextBytes; lastProgressUpdate = stamp;
-      this.db.setItemStatus(item.id, "downloading", { progress: nextProgress, downloadedBytes: nextBytes });
+      if (!control.action) this.db.setItemStatus(item.id, control.paused ? "paused" : "downloading", { progress: nextProgress, downloadedBytes: nextBytes });
     };
     try {
       const plugin = this.plugins.get(item.pluginId);
@@ -80,12 +137,13 @@ export class DownloadQueue {
         await this.runCommandDownload(request.command, request.args.map((argument) => {
           for (const [placeholder, value] of Object.entries(placeholders)) argument = argument.replaceAll(placeholder, value);
           return argument;
-        }), temporaryDirectory, item.expectedBytes, reportProgress);
+        }), temporaryDirectory, item.expectedBytes, reportProgress, control);
         if (!fs.existsSync(temporary) || fs.statSync(temporary).size === 0) throw new Error("Extractor completed without producing a media file");
         reportProgress(0.99, fs.statSync(temporary).size, true);
         checksum = await this.hashFile(temporary);
       } else {
-        const response = await fetch(request.url, { method: request.method ?? "GET", headers: request.headers, body: request.body, redirect: "follow" });
+        const controller = new AbortController(); control.abort = controller;
+        const response = await fetch(request.url, { method: request.method ?? "GET", headers: request.headers, body: request.body, redirect: "follow", signal: controller.signal });
         if (!response.ok || !response.body) throw new Error(`Download returned HTTP ${response.status}`);
         const contentLength = Number(response.headers.get("content-length") ?? item.expectedBytes ?? 0);
         const hash = createHash("sha256"); let received = 0;
@@ -143,18 +201,35 @@ export class DownloadQueue {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.db.setItemStatus(item.id, "failed", { error: message });
-      this.writeLog?.("error", "download", "Download failed", { itemId: item.id, pluginId: item.pluginId, title: item.title, error: message });
+      if (control.action) {
+        if (control.action !== "delete") this.db.setItemStatus(item.id, "cancelled", { error: null });
+        this.writeLog?.("info", "download", control.action === "stop" ? "Recording stopped" : "Download cancelled", { itemId: item.id, title: item.title });
+      } else {
+        this.db.setItemStatus(item.id, "failed", { error: message });
+        this.writeLog?.("error", "download", "Download failed", { itemId: item.id, pluginId: item.pluginId, title: item.title, error: message });
+      }
     } finally {
       if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+      if (control.action === "delete") this.db.deleteItem(item.id);
     }
   }
 
   private get downloadsRoot() { return path.join(this.mediaRoot, ".downloads"); }
 
-  private runCommandDownload(command: string, args: string[], outputDirectory: string, expectedBytes: number | undefined, reportProgress: (progress?: number, downloadedBytes?: number, force?: boolean) => void): Promise<void> {
+  private signal(control: ActiveDownload, signal: NodeJS.Signals) {
+    const child = control.child; if (!child?.pid) return;
+    if (process.platform !== "win32") {
+      try { process.kill(-child.pid, signal); return; } catch { /* Fall back to the direct child. */ }
+    }
+    child.kill(signal);
+  }
+
+  private runCommandDownload(command: string, args: string[], outputDirectory: string, expectedBytes: number | undefined, reportProgress: (progress?: number, downloadedBytes?: number, force?: boolean) => void, control: ActiveDownload): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+      control.child = child;
+      if (control.paused) this.signal(control, "SIGSTOP");
+      if (control.action) this.signal(control, control.action === "stop" ? "SIGINT" : "SIGTERM");
       let output = ""; let progressOutput = ""; let settled = false;
       const remember = (chunk: Buffer) => {
         const text = chunk.toString("utf8"); output = `${output}${text}`.slice(-8_000); progressOutput = `${progressOutput}${text}`.replaceAll("\r", "\n").slice(-2_000);
@@ -172,7 +247,11 @@ export class DownloadQueue {
       }, 250); poll.unref();
       const finish = (error?: Error) => { if (settled) return; settled = true; clearInterval(poll); error ? reject(error) : resolve(); };
       child.once("error", (error) => finish(error));
-      child.once("close", (code) => finish(code === 0 ? undefined : new Error(`${command} exited with code ${code}: ${output.trim() || "no error output"}`)));
+      child.once("close", (code) => {
+        control.child = undefined;
+        if (code === 0 || (control.action === "stop" && this.directoryBytes(outputDirectory) > 0)) finish();
+        else finish(new Error(`${command} exited with code ${code}: ${output.trim() || "no error output"}`));
+      });
     });
   }
 

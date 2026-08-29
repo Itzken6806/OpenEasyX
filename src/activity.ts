@@ -25,7 +25,7 @@ export function downloadTime(item: DownloadTiming, currentTime = Date.now()): st
   if (!item.downloadStartedAt) return "—";
   const started = new Date(item.downloadStartedAt).getTime();
   const finished = item.downloadFinishedAt ? new Date(item.downloadFinishedAt).getTime() : undefined;
-  const end = finished ?? (item.status === "downloading" ? currentTime : undefined);
+  const end = finished ?? (["downloading", "paused", "stopping", "cancelling"].includes(item.status) ? currentTime : undefined);
   if (!Number.isFinite(started) || end === undefined || !Number.isFinite(end)) return "—";
   return formatElapsed(end - started);
 }

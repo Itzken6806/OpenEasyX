@@ -130,14 +130,14 @@ export function LivePlayer({ cam, close }: { cam: LiveCam; close: () => void }) 
 }
 
 export function LiveCamRecordButton({ cam }: { cam: LiveCam }) {
-  const [recording, setRecording] = useState<"idle" | "queueing" | "queued">("idle"); const [recordError, setRecordError] = useState("");
+  const [recording, setRecording] = useState<"idle" | "queueing" | "queued">("idle"); const [itemId, setItemId] = useState(""); const [recordError, setRecordError] = useState("");
   const record = async () => {
     if (recording !== "idle") return;
     setRecording("queueing"); setRecordError("");
-    try { await api("/api/live-cams/record", { method: "POST", body: JSON.stringify({ providerId: cam.providerId, cam }) }); setRecording("queued"); }
+    try { const item = await api<{ itemId: string }>("/api/live-cams/record", { method: "POST", body: JSON.stringify({ providerId: cam.providerId, cam }) }); setItemId(item.itemId); setRecording("queued"); }
     catch (reason) { setRecording("idle"); setRecordError(reason instanceof Error ? reason.message : String(reason)); }
   };
-  return <><button className="quiet" onClick={() => void record()} disabled={recording !== "idle"}><Download/>{recording === "queueing" ? "Queuing…" : recording === "queued" ? "Recording queued" : "Record live"}</button>{recordError && <p className="row-error">{recordError}</p>}</>;
+  return <>{recording === "queued" ? <a className="quiet" href={`/activity?search=${encodeURIComponent(itemId)}`}><Download/>Manage recording</a> : <button className="quiet" onClick={() => void record()} disabled={recording === "queueing"}><Download/>{recording === "queueing" ? "Queuing…" : "Record live"}</button>}{recordError && <p className="row-error">{recordError}</p>}</>;
 }
 
 export function LiveCamViewer({ providerId, camId, close }: { providerId: string; camId: string; close: () => void }) {

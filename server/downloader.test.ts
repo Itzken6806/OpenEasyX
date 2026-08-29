@@ -146,4 +146,32 @@ describe("DownloadQueue", () => {
     await waitFor(() => db.getItem(item.id)?.status === "completed"); queue.stop();
     expect(fs.readFileSync(path.join(mediaDir, "Parts Performer", "example.test", "parts.mp4"), "utf8")).toBe("parts media");
   });
+
+  it("pauses, resumes, stops, and deletes an active recording", async () => {
+    const dataDir = temp("easyx-controls-data"); const mediaDir = temp("easyx-controls-media"); const pluginDir = temp("easyx-controls-plugins");
+    const packageDir = path.join(pluginDir, "test"); fs.mkdirSync(packageDir);
+    const recorder = "const fs=require('node:fs'),file=process.argv[1];fs.writeFileSync(file,'start');const timer=setInterval(()=>fs.appendFileSync(file,'x'),50);process.on('SIGINT',()=>{clearInterval(timer);process.exit(0)})";
+    fs.writeFileSync(path.join(packageDir, "index.mjs"), `export default { manifest: { id: "test.controls", name: "Controls", version: "1", description: "Test", author: "Test", capabilities: ["download-resolver"] }, async resolveDownload() { return { kind: "command", command: process.execPath, args: ["-e", ${JSON.stringify(recorder)}, "{output}"], filename: "recording.mp4" }; } };`);
+    const db = new Database(dataDir); const manager = new PluginManager(db, [pluginDir]); await manager.load();
+    db.setPluginState("test.controls", { installed: true, enabled: true });
+    const person = db.upsertPerformer({ externalId: "person", name: "Live Performer" }, "test.controls");
+    const source = db.addSource(person.id, "test.controls", { externalId: "source", label: "Live", profileUrl: "https://example.test/live", domain: "example.test" });
+    db.ingestItems(source, [{ externalId: "recording", pageUrl: "https://example.test/live", mediaType: "video", filename: "recording.mp4" }]);
+    const item = db.listItems()[0]; db.setItemStatus(item.id, "queued");
+    const queue = new DownloadQueue(db, manager, mediaDir); queue.start();
+    const staged = path.join(mediaDir, ".downloads", item.id, "recording.mp4");
+    await waitFor(() => fs.existsSync(staged) && fs.statSync(staged).size > 5);
+    queue.pause(item.id); expect(db.getItem(item.id)?.status).toBe("paused");
+    const pausedSize = fs.statSync(staged).size; await new Promise((resolve) => setTimeout(resolve, 180)); expect(fs.statSync(staged).size).toBe(pausedSize);
+    queue.resume(item.id); await waitFor(() => fs.statSync(staged).size > pausedSize); expect(db.getItem(item.id)?.status).toBe("downloading");
+    queue.stopRecording(item.id); expect(db.getItem(item.id)?.status).toBe("stopping");
+    await waitFor(() => db.getItem(item.id)?.status === "completed");
+    expect(fs.statSync(path.join(mediaDir, "Live Performer", "example.test", "recording.mp4")).size).toBeGreaterThan(pausedSize);
+
+    db.ingestItems(source, [{ externalId: "delete-me", pageUrl: "https://example.test/live", mediaType: "video", filename: "delete-me.mp4" }]);
+    const doomed = db.getItemBySourceExternalId(source.id, "delete-me")!; db.setItemStatus(doomed.id, "queued");
+    await waitFor(() => db.getItem(doomed.id)?.status === "downloading"); queue.delete(doomed.id);
+    await waitFor(() => db.getItem(doomed.id) === undefined); queue.stop();
+    expect(fs.existsSync(path.join(mediaDir, ".downloads", doomed.id))).toBe(false);
+  });
 });

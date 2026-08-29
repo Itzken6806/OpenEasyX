@@ -201,12 +201,35 @@ export function stripchatLiveCams(payload: unknown): LiveCam[] {
   }).filter((cam): cam is LiveCam => Boolean(cam)));
 }
 
-export function stripchatProfileLiveCams(html: string, requestedUsername?: string): LiveCam[] {
+export type StripchatStreamConfig = { modelId: string; domains: string[] };
+
+function stripchatPreloadedState(html: string): Record<string, unknown> | undefined {
   const marker = html.indexOf("window.__PRELOADED_STATE__");
   const raw = marker >= 0 ? balancedObject(html, marker) : undefined;
-  if (!raw) return [];
-  let state: Record<string, unknown> | undefined;
-  try { state = record(JSON.parse(raw)); } catch { return []; }
+  if (!raw) return undefined;
+  try { return record(JSON.parse(raw)); } catch { return undefined; }
+}
+
+export function stripchatStreamConfig(html: string): StripchatStreamConfig | undefined {
+  const state = stripchatPreloadedState(html);
+  const model = record(record(state?.viewCam)?.model);
+  const modelId = text(model?.id) ?? (whole(model?.id) !== undefined ? String(whole(model?.id)) : undefined);
+  if (!modelId || (model?.isLive !== true && model?.isOnline !== true)) return undefined;
+  const configV3 = record(state?.configV3);
+  const common = record(configV3?.initialCommon);
+  const featureSettings = record(record(configV3?.static)?.featureSettings);
+  const fallbackDomains = record(featureSettings?.hlsFallback)?.fallbackDomains;
+  const streamHosts = record(common?.hlsStreamHosts);
+  const domains = [
+    ...(Array.isArray(fallbackDomains) ? fallbackDomains : []),
+    model?.hlsStreamHost, common?.hlsStreamHost, common?.defaultHlsStreamHost,
+    ...(streamHosts ? Object.values(streamHosts) : []),
+  ].map(text).filter((value): value is string => Boolean(value));
+  return { modelId, domains: [...new Set(domains)] };
+}
+
+export function stripchatProfileLiveCams(html: string, requestedUsername?: string): LiveCam[] {
+  const state = stripchatPreloadedState(html);
   const model = record(record(state?.viewCam)?.model);
   if (!model || (model.isLive !== true && model.isOnline !== true)) return [];
   const cams = stripchatLiveCams({ models: [model] });

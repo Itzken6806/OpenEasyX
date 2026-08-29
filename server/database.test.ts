@@ -179,6 +179,14 @@ describe("Database", () => {
     expect(new Set(result.items.map((item) => item.sourceId))).toEqual(new Set([firstSource.id, secondSource.id]));
   });
 
+  it("finds an activity item by its exact id for direct management links", () => {
+    const db = createDb(); const person = db.createPerformer({ name: "Direct link" });
+    const source = db.addSource(person.id, "plugin.one", { externalId: "source", label: "Feed", profileUrl: "https://example.test", domain: "example.test" });
+    db.ingestItems(source, [{ externalId: "asset", mediaType: "video", title: "A different title" }]);
+    const item = db.listItems()[0];
+    expect(db.listItemsPage({ search: item.id })).toMatchObject({ total: 1, items: [{ id: item.id }] });
+  });
+
   it("requeues every failed item and clears stale retry state", () => {
     const db = createDb(); const person = db.createPerformer({ name: "Retries" });
     db.updateSettings({ autoQueueDiscovered: false });
@@ -194,6 +202,19 @@ describe("Database", () => {
     expect(db.listItemsPage({ category: "active" }).items).toHaveLength(2);
     expect(db.getItem(first.id)).toMatchObject({ status: "queued", progress: 0, error: undefined, downloadStartedAt: undefined, downloadFinishedAt: undefined });
     expect(db.retryFailedItems()).toBe(0);
+  });
+
+  it("keeps paused work paused and does not restart interrupted cancellation", () => {
+    const db = createDb(); const person = db.createPerformer({ name: "Recovery" });
+    db.updateSettings({ autoQueueDiscovered: false });
+    const source = db.addSource(person.id, "plugin.one", { externalId: "s", label: "Feed", profileUrl: "https://example.test", domain: "example.test" });
+    db.ingestItems(source, [{ externalId: "paused", mediaType: "video" }, { externalId: "stopping", mediaType: "video" }, { externalId: "running", mediaType: "video" }]);
+    const [running, stopping, paused] = db.listItems();
+    db.setItemStatus(paused.id, "paused"); db.setItemStatus(stopping.id, "stopping"); db.setItemStatus(running.id, "downloading");
+    expect(db.requeueInterruptedDownloads()).toBe(2);
+    expect(db.getItem(paused.id)?.status).toBe("paused");
+    expect(db.getItem(stopping.id)?.status).toBe("cancelled");
+    expect(db.getItem(running.id)?.status).toBe("queued");
   });
 
   it("stores media sources with automation defaults", () => {

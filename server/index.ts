@@ -484,7 +484,8 @@ app.get<{ Querystring: Record<string, string | undefined> }>("/api/items", async
     sourceId: z.string().trim().min(1).optional(), sourceDomain: z.string().trim().min(1).optional(), performerId: z.string().trim().min(1).optional(),
     search: z.string().trim().max(200).optional(),
   }).parse(request.query);
-  return db.listItemsPage(query);
+  const result = db.listItemsPage(query);
+  return { ...result, items: result.items.map((item) => ({ ...item, outputPath: queue.outputPath(item.id) })) };
 });
 app.post("/api/items/retry-failed", async () => ({ queued: db.retryFailedItems() }));
 app.post<{ Params: { id: string } }>("/api/items/:id/queue", async (request) => {
@@ -493,6 +494,11 @@ app.post<{ Params: { id: string } }>("/api/items/:id/queue", async (request) => 
   if (!["available", "failed"].includes(item.status)) throw Object.assign(new Error(`Cannot queue an item with status '${item.status}'`), { statusCode: 409 });
   return db.setItemStatus(item.id, "queued", { progress: 0 });
 });
+app.post<{ Params: { id: string } }>("/api/items/:id/pause", async (request) => queue.pause(request.params.id));
+app.post<{ Params: { id: string } }>("/api/items/:id/resume", async (request) => queue.resume(request.params.id));
+app.post<{ Params: { id: string } }>("/api/items/:id/stop", async (request) => queue.stopRecording(request.params.id));
+app.post<{ Params: { id: string } }>("/api/items/:id/cancel", async (request) => queue.cancel(request.params.id));
+app.delete<{ Params: { id: string } }>("/api/items/:id", async (request) => queue.delete(request.params.id));
 
 app.get("/api/settings", async () => ({ ...db.getSettings(), mediaRoot: mediaDir, ...library.settings() }));
 app.put<{ Body: Record<string, unknown> }>("/api/settings", async (request) => {

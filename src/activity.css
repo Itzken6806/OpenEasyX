@@ -1,6 +1,6 @@
 .table-head,
 .table-row {
-  grid-template-columns: minmax(230px, 2fr) minmax(120px, 0.9fr) 0.5fr minmax(140px, 0.9fr) 0.75fr 0.65fr 42px;
+  grid-template-columns: minmax(250px, 2fr) minmax(120px, 0.8fr) 0.45fr minmax(140px, 0.9fr) 0.7fr 0.6fr minmax(150px, auto);
 }
 
 .activity-heading > div:last-child,
@@ -85,6 +85,12 @@
   white-space: nowrap;
 }
 
+.output-path { display: flex; align-items: center; gap: 4px; max-width: 100%; color: #6f8cb4 !important; }
+.output-path svg { flex: none; }
+.activity-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.activity-actions .icon-button { width: 29px; height: 29px; }
+.activity-actions .icon-button.danger { color: #ff7182; }
+
 .activity-source > span {
   color: #aaa;
 }
@@ -100,6 +106,10 @@
 }
 
 .activity-status { display: grid; gap: 6px; min-width: 0; }
+.activity-status .badge.paused { color: #ffca67; background: rgba(255, 190, 70, .1); }
+.activity-status .badge.stopping,
+.activity-status .badge.cancelling { color: #c5a8ff; background: rgba(145, 104, 255, .12); }
+.activity-status .badge.cancelled { color: #888; background: #24242a; }
 .progress-wrap { display: grid; grid-template-columns: minmax(55px, 1fr) minmax(72px, auto); align-items: center; gap: 6px; }
 .progress-wrap small { margin: 0; color: #888; font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .download-progress { display: block; height: 5px; overflow: hidden; border-radius: 4px; background: #292933; }
